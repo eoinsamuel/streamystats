@@ -657,3 +657,4 @@
 .wl-user-content:disabled { opacity: .65; }
 .wl-user-filter { display: flex; align-items: center; gap: .6rem; }
 .wl-user-filter select { max-width: 200px; }
+.wl-lists > .wl-buttons { grid-column: 1 / -1; }

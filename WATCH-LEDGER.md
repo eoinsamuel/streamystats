@@ -1,65 +1,47 @@
-# Watch Ledger for Streamystats, first version
+# Watch Ledger for Streamystats
 
-This is a custom build of Streamystats based on upstream commit `1a154af6e59b5f6a5407f1e18704cc6bd5ac15bf`. The existing dashboard stays in place. **Watch Ledger** adds a SIMKL-style history with daily cards, an activity calendar, monthly and weekly recaps, list statuses, ratings, manual logs, and reversible corrections. **Raw Sessions** keeps the original session table available.
+Watch Ledger adds a daily viewing history, activity calendar, weekly/monthly recaps, manual logs, lists, ratings, and reversible corrections. Raw Sessions keeps the original playback records available.
 
-## Install on your Ubuntu server
+## Installation
 
-Extract the project folder onto your server. Keep the extracted folder after installation: it contains the Compose override used by your upgraded app containers.
-
-From that folder:
+Run from the source checkout on your Docker host:
 
 ```bash
 bash install-ledger.sh --check
-bash install-ledger.sh
+bash install-ledger.sh --install
 ```
 
-The installer is configured for your `streamystat-nextjs-app-1`, `streamystat-job-server-1`, and `streamystat-vectorchord-1` containers. It discovers the original Compose files from Docker labels. It builds two local images, briefly stops the Streamystats apps, backs up the full database, validates that backup, and recreates only the two app services. The job server runs the additive migration for `ledger_records` automatically. The database image and volume, Jellyfin, and other services are not replaced. Builds may take several minutes. The installer restores the previous app images if installation fails.
+The installer discovers a single Compose `nextjs-app` container and the `job-server` and `vectorchord` containers in its project. For multiple installations or custom names, set `LEDGER_APP_CONTAINER`, `LEDGER_JOB_CONTAINER`, and `LEDGER_DB_CONTAINER`. It builds locally, briefly stops the apps, takes and validates a full PostgreSQL backup, and recreates only the two apps. Docker Compose V2 with `--wait` support is required. Keep the source directory and the printed backup location. Backups are excluded from Git and Docker build contexts. Do not use `docker compose down -v`.
 
-You need Docker Compose V2 with `--wait` support. Runtime connection settings and secrets remain in your original Compose environment. Nothing in this package connects to your running server until you run the installer.
+`bash install-ledger.sh --rollback` restores the original Compose images. The additive ledger table is retained. Rollback does not delete imports or corrections.
 
-To return to the original app images:
+## Users, imports, and settings
 
-```bash
-bash install-ledger.sh --rollback
-```
+Open Watch Ledger and choose a user. Regular accounts can access themselves. Administrators can select another user after their current privileges are verified with Jellyfin. **Imports, manual logs, corrections, ratings, and settings belong to the selected user.** Selecting another user as an administrator lets you edit that user's ledger.
 
-The additional ledger table is retained for a later reinstall. Keep the printed database backup too. Do not use `docker compose down -v`.
+Import SIMKL JSON for episode history and CSV for list metadata. Import dates are retained as supplied. There is no setup-day cutoff and no automatic classification of older dates as estimated. Missing or sentinel dates remain unknown. Existing imports retain their original dates and are normalized on read without rewriting their source records. Old setup-day/estimated labels are no longer used. Imported and manual runtime remain separate from recorded Jellyfin playback; their cards identify their source. An import's runtime is a title-runtime total, not a playback measurement.
 
-## First run
+Imports are additive: an older backup cannot remove episodes found in an earlier upload. Reimporting the same episode retains its later available watch date. CSV supplies list status, ratings, and last-episode summaries; JSON supplies detailed history. Imports do not write to SIMKL or Jellyfin.
 
-1. Open your usual Streamystats address and sign in as your own Jellyfin user.
-2. Choose **Watch Ledger** in the sidebar.
-3. Click **Import SIMKL** and select your older `SimklBackup.json` and newer `SimklBackup.csv`. You can select both together; JSON is processed before CSV. Importing the same title from the same format updates its existing record rather than appending duplicates.
-4. The JSON supplies per-episode history. The CSV supplies the newer list status, last episode summary and ratings; it does not invent episode history that is absent from the JSON.
-5. In history settings, confirm the timezone, the SIMKL setup day, and the titles with confirmed prior viewings.
+Completion defaults to 90%, timezone follows the server (UTC fallback), and confirmed prior titles start empty. These settings can be changed for the selected user. Confirmed prior titles are useful for undated prior viewings. Manual-log retries reuse one request identity; close the form before intentionally logging a different watch.
 
-Defaults match the history you described: America/New_York, April 25, 2026 as the bulk setup day, and Smallville as a confirmed prior viewing. Setup-day records have unknown original watch dates. Earlier SIMKL dates are approximate; later dates are accurate. Approximate and unknown dates never contribute activity, recaps, or streaks. Their runtime totals are labeled estimates. These settings belong to the signed-in user.
+## Watches and corrections
 
-## Counting watches
+Sessions for an unfinished episode are combined across pauses, days, and devices. Legacy recordings lack sufficient coverage data to reliably infer repeat viewings, so they are grouped conservatively and can be corrected manually. New recordings accumulate unique watched portions. A restart near the beginning after completion opens a tentative new watch, counted as a completed rewatch only after reaching the completion threshold.
 
-A playback session is not a watch. Legacy sessions for the same episode are grouped into one watch even when they span several days or devices. Existing inferred sessions are context, not measured time. Recognizable imported endpoint copies are excluded from the ledger's recorded time without deleting raw sessions.
+Earlier days of a multi-day watch show In progress and its final day shows Completed. History's Watch status filter uses the whole watch's current status, so completed watches are excluded from In progress on every day. Search, media type, and date filters apply before pagination. History loads 100 cards per page; headline, activity, and recap totals use all matching supported history, not just that page. Lists show 100 titles per page.
 
-For new playback, the job server records the portions of the media that advance during normal playback. Pauses, rewinds, network gaps and seek jumps do not create extra coverage. Overlapping portions are counted once. The completion threshold defaults to 90% and is adjustable. A restart near the beginning after a completed watch opens a tentative new watch; it contributes to completed rewatch counts only when it meets the completion threshold. This also updates Wrapped's rewatch section to use completed watches instead of session counts.
+Open a card's arrow menu to mark completion, change rewatch status/date, or hide the watch. Reset corrections to undo. Raw sessions are retained. Wrapped uses completed watches for its rewatch section; other upstream dashboard panels still use original session analytics.
 
-Past data cannot be reconstructed into precise watched ranges. Legacy completion flags/positions remain reported completion, labeled **Legacy completion**. Imported SIMKL completion can establish that something was watched. Undated/estimated imports enrich existing viewing rather than automatically manufacturing a second watch. A confirmed prior title such as Smallville can establish its earlier watch despite an estimated first-watch date. Unknown episode numbering on deleted Jellyfin metadata is preserved without guessing which SIMKL episode it belongs to.
+## Limits
 
-## Editing
+- Jellyfin's polled Sessions response does not provide seek events or playback speed. Coverage accepts plausible normal-speed progression and rejects obvious jumps. Subsecond seeks indistinguishable from polling jitter cannot be detected reliably. Faster playback can be undercounted; manual completion remains available.
+- A final playback position is included when Jellyfin supplies a matching final observation. A vanished session supplies no final position, so the unobserved tail is not fabricated.
+- Sessions spanning midnight are attributed to their start date.
+- Reads are bounded to 50,000 sessions, 10,000 ledger records/series, and 32 MB of ledger JSON per user. Exceeding a limit shows an explicit error rather than silently truncating history. Imports exceeding the record/JSON limits roll back. Ledger builds use short-lived caching, compact projections, and paginated responses; unlimited-history materialized aggregates are not implemented.
+- No live SIMKL/Trakt sync or external catalog search. Enter a title manually or use imported titles.
+- Unknown episode numbering on removed library items is preserved without guessing.
+- Upstream JSON exports do not include ledger additions. Use full PostgreSQL backups.
+- Missing posters can use SIMKL's public image server; disable remote posters in settings for offline images.
 
-Use a watch card's menu to mark completion, correct whether it is a rewatch, change a watch date, or remove it from the ledger. Original sessions remain in Raw Sessions. Reset that watch's corrections to undo the change. The footer can reset all corrections if watches were hidden. Manual logs can include titles that are absent from Jellyfin. List/rating changes are local; nothing is written to SIMKL or Jellyfin.
-
-## Current limitations
-
-- No live SIMKL or Trakt API sync yet. Existing JSON/CSV imports work without paid API features.
-- No external catalog search yet; manually enter a title or choose one of your imported titles.
-- Daily recorded time is attributed to the session's start date. Sessions spanning midnight do not yet have exact per-day allocation.
-- The SIMKL JSON uses show-level runtime estimates for imported episode history.
-- Automatic restart detection applies to range-aware recordings made by this build. Legacy raw sessions are grouped conservatively and can be corrected manually.
-- Deleting/hiding a ledger watch updates ledger/Wrapped watch counts; other upstream dashboard panels continue to show raw session-based analytics.
-- The upstream JSON backup/export route does not include ledger additions. Use full PostgreSQL backups to preserve imported history, manual logs, settings and corrections. The installer takes one before upgrading.
-- The live Docker images could not be built or launched in the preparation environment, which has no Docker daemon. The Next.js production compile, both TypeScript checks, import regression tests, watch-engine tests, migration execution under PostgreSQL WASM, and shell installer checks are recorded in VALIDATION.md. Browser visual QA uses a static rendering of the actual component, not a live Jellyfin connection.
-
-## Source and data
-
-Your personal backups and API keys are not included in the source package. Imported records stay in PostgreSQL, scoped to your server and Jellyfin user. Viewing data is not sent to SIMKL. The browser can load missing posters from SIMKL’s public image server without a token; disable remote posters in history settings for offline-only images. Native session synchronization continues to use Streamystats' existing Jellyfin integration.
-
-Upstream: https://github.com/fredrikburmester/streamystats . The upstream package metadata declares MIT licensing; retain upstream attribution when distributing changes.
+Upstream: https://github.com/fredrikburmester/streamystats. Retain upstream license and attribution.

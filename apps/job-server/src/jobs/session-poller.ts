@@ -1,4 +1,4 @@
-import { observePlayback } from "./watch-coverage";
+import { observePlayback, observeFinalPlayback } from "./watch-coverage";
 import {
   db,
   activeSessions,
@@ -13,11 +13,7 @@ import {
   type Server,
 } from "@streamystats/database";
 import { JellyfinClient } from "../jellyfin/client";
-import {
-  JellyfinSession,
-  TrackedSession,
-  ActiveSessionResponse,
-} from "../jellyfin/types";
+import { JellyfinSession, TrackedSession, ActiveSessionResponse } from "../jellyfin/types";
 import { and, eq, notInArray, sql } from "drizzle-orm";
 import { formatError } from "../utils/format-error";
 import { structuredLog as log } from "../utils/structured-log";
@@ -64,10 +60,7 @@ class SessionPoller {
   private totalPollCount = 0;
   private totalSuccessCount = 0;
   private lastPersistedSessionCounts: Map<number, number> = new Map();
-  private pollingEnabledCache: Map<
-    number,
-    { enabled: boolean; expiresAt: number }
-  > = new Map();
+  private pollingEnabledCache: Map<number, { enabled: boolean; expiresAt: number }> = new Map();
 
   // ============================================================================
   // Public API
@@ -206,7 +199,7 @@ class SessionPoller {
               error: formatError(err),
             });
           }
-        })
+        }),
       );
 
       this.lastPollAt = Date.now();
@@ -226,7 +219,7 @@ class SessionPoller {
       // Exponential backoff: 5s -> 10s -> 20s -> 40s -> 60s max
       this.currentPollIntervalMs = Math.min(
         60_000,
-        POLL_INTERVAL_MS * Math.pow(2, Math.min(this.consecutiveDbErrors, 4))
+        POLL_INTERVAL_MS * Math.pow(2, Math.min(this.consecutiveDbErrors, 4)),
       );
 
       if (shouldLog("session-poller-tick-failed", 30_000)) {
@@ -264,10 +257,7 @@ class SessionPoller {
   // Session Lifecycle
   // ============================================================================
 
-  private async processSessions(
-    server: Server,
-    currentSessions: JellyfinSession[]
-  ): Promise<void> {
+  private async processSessions(server: Server, currentSessions: JellyfinSession[]): Promise<void> {
     const serverKey = `server_${server.id}`;
     const trackedSessions = this.trackedSessions.get(serverKey) || new Map();
 
@@ -282,14 +272,15 @@ class SessionPoller {
     const updatedSessions = await this.handleUpdatedSessions(
       server,
       changes.updatedSessions,
-      mergedSessions
+      mergedSessions,
     );
 
     // Handle ended sessions
     const finalSessions = await this.handleEndedSessions(
       server,
       changes.endedSessions,
-      updatedSessions
+      updatedSessions,
+      currentSessions,
     );
 
     this.trackedSessions.set(serverKey, finalSessions);
@@ -298,13 +289,17 @@ class SessionPoller {
     try {
       await this.persistActiveSessions(server.id, finalSessions);
     } catch (err) {
-      log("session-poller", { action: "persist-error", serverId: server.id, error: formatError(err) });
+      log("session-poller", {
+        action: "persist-error",
+        serverId: server.id,
+        error: formatError(err),
+      });
     }
   }
 
   private async handleNewSessions(
     server: Server,
-    newSessions: JellyfinSession[]
+    newSessions: JellyfinSession[],
   ): Promise<Map<string, TrackedSession>> {
     const now = new Date();
     const tracked = new Map<string, TrackedSession>();
@@ -384,7 +379,7 @@ class SessionPoller {
   private async handleUpdatedSessions(
     server: Server,
     updatedSessions: JellyfinSession[],
-    trackedSessions: Map<string, TrackedSession>
+    trackedSessions: Map<string, TrackedSession>,
   ): Promise<Map<string, TrackedSession>> {
     const now = new Date();
 
@@ -417,7 +412,7 @@ class SessionPoller {
             tracked,
             finalDuration,
             percentComplete,
-            percentComplete > 90
+            percentComplete > 90,
           );
         }
 
@@ -453,7 +448,13 @@ class SessionPoller {
 
       const updatedRecord: TrackedSession = {
         ...tracked,
-        watchedRanges: observePlayback({ ranges: tracked.watchedRanges ?? [], previousTicks: tracked.positionTicks, currentTicks: currentPosition, elapsedSeconds: (now.getTime()-tracked.lastUpdateTime.getTime())/1000, wasPaused: tracked.isPaused }),
+        watchedRanges: observePlayback({
+          ranges: tracked.watchedRanges ?? [],
+          previousTicks: tracked.positionTicks,
+          currentTicks: currentPosition,
+          elapsedSeconds: (now.getTime() - tracked.lastUpdateTime.getTime()) / 1000,
+          wasPaused: tracked.isPaused,
+        }),
         positionTicks: currentPosition,
         isPaused: currentPaused,
         lastActivityDate: this.parseDate(session.LastActivityDate),
@@ -475,14 +476,17 @@ class SessionPoller {
         transcodingAudioCodec: transcodingInfo?.AudioCodec ?? tracked.transcodingAudioCodec,
         transcodingVideoCodec: transcodingInfo?.VideoCodec ?? tracked.transcodingVideoCodec,
         transcodingContainer: transcodingInfo?.Container ?? tracked.transcodingContainer,
-        transcodingIsVideoDirect: transcodingInfo?.IsVideoDirect ?? tracked.transcodingIsVideoDirect,
-        transcodingIsAudioDirect: transcodingInfo?.IsAudioDirect ?? tracked.transcodingIsAudioDirect,
+        transcodingIsVideoDirect:
+          transcodingInfo?.IsVideoDirect ?? tracked.transcodingIsVideoDirect,
+        transcodingIsAudioDirect:
+          transcodingInfo?.IsAudioDirect ?? tracked.transcodingIsAudioDirect,
         transcodingBitrate: transcodingInfo?.Bitrate ?? tracked.transcodingBitrate,
         transcodingCompletionPercentage:
           transcodingInfo?.CompletionPercentage ?? tracked.transcodingCompletionPercentage,
         transcodingWidth: transcodingInfo?.Width ?? tracked.transcodingWidth,
         transcodingHeight: transcodingInfo?.Height ?? tracked.transcodingHeight,
-        transcodingAudioChannels: transcodingInfo?.AudioChannels ?? tracked.transcodingAudioChannels,
+        transcodingAudioChannels:
+          transcodingInfo?.AudioChannels ?? tracked.transcodingAudioChannels,
         transcodingHardwareAccelerationType:
           transcodingInfo?.HardwareAccelerationType ?? tracked.transcodingHardwareAccelerationType,
         transcodeReasons: transcodingInfo?.TranscodeReasons ?? tracked.transcodeReasons,
@@ -497,11 +501,16 @@ class SessionPoller {
   private async handleEndedSessions(
     server: Server,
     endedSessions: Array<{ key: string; session: TrackedSession }>,
-    trackedSessions: Map<string, TrackedSession>
+    trackedSessions: Map<string, TrackedSession>,
+    finalObservations: JellyfinSession[] = [],
   ): Promise<Map<string, TrackedSession>> {
     const now = new Date();
 
-    for (const { key, session: tracked } of endedSessions) {
+    for (const { key, session } of endedSessions) {
+      // An unfiltered final observation can carry a position even when the
+      // device no longer has a valid NowPlayingItem. Never extrapolate it.
+      const observation = finalObservations.find((current) => current.Id === session.sessionId);
+      const tracked = observeFinalPlayback({ tracked: session, observation, now });
       const finalDuration = this.getFinalDuration(tracked, now);
 
       if (finalDuration > 1) {
@@ -518,13 +527,7 @@ class SessionPoller {
           completed,
         });
 
-        await this.savePlaybackRecord(
-          server,
-          tracked,
-          finalDuration,
-          percentComplete,
-          completed
-        );
+        await this.savePlaybackRecord(server, tracked, finalDuration, percentComplete, completed);
       }
 
       trackedSessions.delete(key);
@@ -536,7 +539,7 @@ class SessionPoller {
   private async createTrackedSession(
     server: Server,
     session: JellyfinSession,
-    now: Date
+    now: Date,
   ): Promise<TrackedSession | null> {
     const item = session.NowPlayingItem;
     if (!item) return null; // Safety check
@@ -559,8 +562,8 @@ class SessionPoller {
       seasonId: item.SeasonId,
       runtimeTicks: item.RunTimeTicks || 0,
       positionTicks: playState.PositionTicks || 0,
-        startPositionTicks: playState.PositionTicks || 0,
-        watchedRanges: [],
+      startPositionTicks: playState.PositionTicks || 0,
+      watchedRanges: [],
       isPaused: playState.IsPaused || false,
       startTime: now,
       lastUpdateTime: now,
@@ -601,7 +604,7 @@ class SessionPoller {
    */
   private async resolveNowPlayingItem(
     server: Server,
-    session: JellyfinSession
+    session: JellyfinSession,
   ): Promise<ResolvedSessionItem> {
     const item = session.NowPlayingItem;
     if (!item) return { itemId: "", resolvedVia: "unresolved" };
@@ -619,9 +622,7 @@ class SessionPoller {
         const rows = await db
           .select({ itemId: mediaSources.itemId })
           .from(mediaSources)
-          .where(
-            and(eq(mediaSources.id, mediaSourceId), eq(mediaSources.serverId, server.id))
-          )
+          .where(and(eq(mediaSources.id, mediaSourceId), eq(mediaSources.serverId, server.id)))
           .limit(1);
         return rows[0]?.itemId ?? null;
       },
@@ -671,7 +672,7 @@ class SessionPoller {
     tracked: TrackedSession,
     finalDuration: number,
     percentComplete: number,
-    completed: boolean
+    completed: boolean,
   ): Promise<void> {
     try {
       await db.transaction(async (tx) => {
@@ -693,9 +694,7 @@ class SessionPoller {
         };
 
         let validItemId =
-          tracked.itemId && (await itemExists(tracked.itemId))
-            ? tracked.itemId
-            : null;
+          tracked.itemId && (await itemExists(tracked.itemId)) ? tracked.itemId : null;
         const originalItemId = tracked.jellyfinItemId ?? tracked.itemId;
         if (!validItemId && originalItemId) {
           // Sync may have added the item or its version mapping during playback.
@@ -710,10 +709,7 @@ class SessionPoller {
                   .select({ itemId: mediaSources.itemId })
                   .from(mediaSources)
                   .where(
-                    and(
-                      eq(mediaSources.id, mediaSourceId),
-                      eq(mediaSources.serverId, server.id)
-                    )
+                    and(eq(mediaSources.id, mediaSourceId), eq(mediaSources.serverId, server.id)),
                   )
                   .limit(1);
                 return rows[0]?.itemId ?? null;
@@ -761,8 +757,7 @@ class SessionPoller {
           subtitleStreamIndex: tracked.subtitleStreamIndex,
           playMethod: tracked.playMethod,
           isTranscoded:
-            tracked.playMethod !== "DirectPlay" &&
-            tracked.playMethod !== "DirectStream",
+            tracked.playMethod !== "DirectPlay" && tracked.playMethod !== "DirectStream",
           mediaSourceId: tracked.mediaSourceId,
           repeatMode: tracked.repeatMode,
           playbackOrder: tracked.playbackOrder,
@@ -813,7 +808,7 @@ class SessionPoller {
 
   private async persistActiveSessions(
     serverId: number,
-    sessionsMap: Map<string, TrackedSession>
+    sessionsMap: Map<string, TrackedSession>,
   ): Promise<void> {
     const prevCount = this.lastPersistedSessionCounts.get(serverId) ?? -1;
     if (sessionsMap.size === 0 && prevCount === 0) {
@@ -854,7 +849,7 @@ class SessionPoller {
         await tx
           .delete(activeSessions)
           .where(
-            and(eq(activeSessions.serverId, serverId), notInArray(activeSessions.sessionKey, keys))
+            and(eq(activeSessions.serverId, serverId), notInArray(activeSessions.sessionKey, keys)),
           );
       }
     });
@@ -912,7 +907,7 @@ class SessionPoller {
             session,
             finalDuration,
             percentComplete,
-            percentComplete > 90
+            percentComplete > 90,
           );
         }
       }
@@ -947,8 +942,8 @@ class SessionPoller {
       .where(
         and(
           eq(serverJobConfigurations.serverId, serverId),
-          eq(serverJobConfigurations.jobKey, "session-polling")
-        )
+          eq(serverJobConfigurations.jobKey, "session-polling"),
+        ),
       )
       .limit(1);
 
@@ -1000,7 +995,7 @@ class SessionPoller {
 
   private detectSessionChanges(
     currentSessions: JellyfinSession[],
-    trackedSessions: Map<string, TrackedSession>
+    trackedSessions: Map<string, TrackedSession>,
   ): SessionChanges {
     const currentMap = new Map<string, JellyfinSession>();
     const newSessions: JellyfinSession[] = [];
@@ -1024,17 +1019,9 @@ class SessionPoller {
   calculateDuration(tracked: TrackedSession, currentPaused: boolean): number {
     const wasPaused = tracked.isPaused;
     const now = Date.now();
-    const elapsedSinceLastUpdate = Math.floor(
-      (now - tracked.lastUpdateTime.getTime()) / 1000
-    );
-    const maxGapSeconds = Math.max(
-      15,
-      Math.ceil((this.currentPollIntervalMs / 1000) * 2)
-    );
-    const clampedElapsed = Math.min(
-      Math.max(0, elapsedSinceLastUpdate),
-      maxGapSeconds
-    );
+    const elapsedSinceLastUpdate = Math.floor((now - tracked.lastUpdateTime.getTime()) / 1000);
+    const maxGapSeconds = Math.max(15, Math.ceil((this.currentPollIntervalMs / 1000) * 2));
+    const clampedElapsed = Math.min(Math.max(0, elapsedSinceLastUpdate), maxGapSeconds);
 
     // Was playing, now paused or still playing - add elapsed time
     if (!wasPaused) {
@@ -1048,13 +1035,8 @@ class SessionPoller {
   getFinalDuration(tracked: TrackedSession, now: Date): number {
     let finalDuration = tracked.playDuration;
     if (!tracked.isPaused) {
-      const timeDiff = Math.floor(
-        (now.getTime() - tracked.lastUpdateTime.getTime()) / 1000
-      );
-      const maxGapSeconds = Math.max(
-        15,
-        Math.ceil((this.currentPollIntervalMs / 1000) * 2)
-      );
+      const timeDiff = Math.floor((now.getTime() - tracked.lastUpdateTime.getTime()) / 1000);
+      const maxGapSeconds = Math.max(15, Math.ceil((this.currentPollIntervalMs / 1000) * 2));
       const clampedTimeDiff = Math.min(Math.max(0, timeDiff), maxGapSeconds);
       finalDuration += clampedTimeDiff;
     }
@@ -1062,9 +1044,7 @@ class SessionPoller {
   }
 
   private getPercentComplete(tracked: TrackedSession): number {
-    return tracked.runtimeTicks > 0
-      ? (tracked.positionTicks / tracked.runtimeTicks) * 100
-      : 0;
+    return tracked.runtimeTicks > 0 ? (tracked.positionTicks / tracked.runtimeTicks) * 100 : 0;
   }
 
   private parseDate(dateStr?: string): Date | undefined {

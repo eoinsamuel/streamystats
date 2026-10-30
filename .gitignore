@@ -102,3 +102,10 @@ docker/dev/jellyfin/media/
 
 # Git worktrees
 .worktrees/
+
+# Private Watch Ledger data and local verification outputs
+pre-ledger-backup-*/
+*.dump
+.ledger-debug.env
+.next-*/
+**/.next-*/

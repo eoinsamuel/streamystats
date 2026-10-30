@@ -17,3 +17,9 @@ npm-debug.log
 .env.production
 .env.development
 !.env.example
+# Private Watch Ledger data and local verification outputs
+pre-ledger-backup-*/
+*.dump
+.ledger-debug.env
+.next-*/
+**/.next-*/

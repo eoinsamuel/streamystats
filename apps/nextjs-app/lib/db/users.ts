@@ -464,6 +464,7 @@ export const validateAdminWithJellyfin = async (): Promise<boolean> => {
   try {
     const response = await fetch(`${getInternalUrl(server)}/Users/Me`, {
       method: "GET",
+      cache: "no-store",
       headers: jellyfinHeaders(token?.value || ""),
       signal: AbortSignal.timeout(5000),
     });

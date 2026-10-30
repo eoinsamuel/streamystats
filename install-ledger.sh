@@ -1,14 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SOURCE_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-APP='streamystat-nextjs-app-1'
-JOB='streamystat-job-server-1'
-DB='streamystat-vectorchord-1'
 MODE="${1:---install}"
 case "$MODE" in --install|--rollback|--check) ;; *) printf 'Usage: bash install-ledger.sh [--install|--rollback|--check]\n' >&2; exit 2;; esac
 command -v docker >/dev/null
 docker compose version >/dev/null
+discover_container() {
+  local service="$1" project_filter="${2:-}" matches=()
+  local filters=(--filter "label=com.docker.compose.service=$service")
+  if [[ -n "$project_filter" ]]; then filters+=(--filter "label=com.docker.compose.project=$project_filter"); fi
+  mapfile -t matches < <(docker ps -a "${filters[@]}" --format '{{.Names}}')
+  if (( ${#matches[@]} != 1 )); then
+    printf 'Expected one Compose %s container; found %s. Set LEDGER_APP_CONTAINER, LEDGER_JOB_CONTAINER or LEDGER_DB_CONTAINER explicitly.\n' "$service" "${#matches[@]}" >&2
+    return 1
+  fi
+  printf '%s' "${matches[0]}"
+}
+APP="${LEDGER_APP_CONTAINER:-$(discover_container nextjs-app)}"
 project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$APP")"
+JOB="${LEDGER_JOB_CONTAINER:-$(discover_container job-server "$project")}"
+DB="${LEDGER_DB_CONTAINER:-$(discover_container vectorchord "$project")}"
 compose_dir="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.working_dir"}}' "$APP")"
 config_list="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}' "$APP")"
 [[ -n "$project" && "$project" != '<no value>' && -d "$compose_dir" ]] || { printf 'Cannot locate the existing Compose project. No changes made.\n' >&2; exit 1; }
