@@ -181,3 +181,14 @@ test("invalid timezones are rejected and incoming manual timestamps normalize to
   ).toBe(200);
   expect(writes[0]).toMatchObject({ payload: { watchedAt: "2026-10-29T18:00:00.123000Z" } });
 });
+
+test("the shared source switch accepts true and false without replacing other settings", async () => {
+  for (const includeImportedStats of [true, false]) {
+    expect(
+      (await POST(request({ action: "settings", settings: { includeImportedStats } }))).status,
+    ).toBe(200);
+  }
+  expect(writes[0]).toMatchObject({ payload: { includeImportedStats: true } });
+  expect(writes[1]).toMatchObject({ payload: { includeImportedStats: false } });
+  expect(invalidations).toContainEqual(["ledger-stats-1", { expire: 0 }]);
+});

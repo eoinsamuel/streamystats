@@ -78,7 +78,11 @@ function historyValue(value: unknown): HistoryEntry | null {
     completed: r.completed,
     source: r.source,
     // Migrate legacy date labels on read; source dates remain intact in JSONB.
-    accuracy: validDate(r.originalWatchedAt ?? r.watchedAt) ? "accurate" : "unknown",
+    accuracy: validDate(r.originalWatchedAt ?? r.watchedAt)
+      ? r.accuracy === "estimated"
+        ? "estimated"
+        : "accurate"
+      : "unknown",
     watchedAt: validDate(r.originalWatchedAt ?? r.watchedAt),
     originalWatchedAt: validDate(r.originalWatchedAt),
     season: typeof r.season === "number" ? r.season : undefined,
@@ -106,7 +110,7 @@ function ids(value: unknown): Record<string, string> {
       )
     : {};
 }
-export async function getWatchLedger({ serverId, userId }: { serverId: number; userId: string }) {
+export async function getWatchLedger({ serverId, userId }: { serverId: number; userId: string; revision?: string }) {
   "use cache";
   cacheLife({ stale: 0, revalidate: 10, expire: 15 });
   cacheTag(`ledger-${serverId}-${userId}`);
@@ -206,6 +210,8 @@ export async function getWatchLedger({ serverId, userId }: { serverId: number; u
         if (typeof payload.completionThreshold === "number")
           settings.completionThreshold = payload.completionThreshold;
         if (typeof payload.timezone === "string") settings.timezone = payload.timezone;
+        if (typeof payload.includeImportedStats === "boolean")
+          settings.includeImportedStats = payload.includeImportedStats;
         if (typeof payload.remotePosters === "boolean")
           settings.remotePosters = payload.remotePosters;
         if (Array.isArray(payload.confirmedPriorTitles))

@@ -121,23 +121,18 @@ export function Ledger({
     [manual, setManual] = useState(false),
     [edit, setEdit] = useState<Watch | null>(null),
     [settings, setSettings] = useState(false),
-    [monthOffset, setMonthOffset] = useState(0),
-    [weekOffset, setWeekOffset] = useState(0),
     [statusFilter, setStatusFilter] = useState("all"),
     [watchStatus, setWatchStatus] = useState("all"),
     [page, setPage] = useState(0),
     [listPage, setListPage] = useState(0),
     [loading, setLoading] = useState(false);
   const manualRequestId = useRef<string>("");
+  const generation = useRef(0),
+    mutating = useRef(false);
   const settingsBaseline = useRef(initial.settings);
   const upload = useRef<HTMLInputElement>(null),
     zone = data.settings.timezone;
   const today = dayKey(new Date().toISOString(), zone);
-  const monthDate = new Date(`${today.slice(0, 7)}-01T12:00:00Z`);
-  monthDate.setUTCMonth(monthDate.getUTCMonth() + monthOffset);
-  const month = monthDate.toISOString().slice(0, 7),
-    week = dayOffset(Monday(today), weekOffset * 7),
-    weekEnd = dayOffset(week, 6);
   const endpoint = `${basePath}/api/ledger?${new URLSearchParams({
     serverId: String(serverId),
     userId: selectedUserId,
@@ -147,31 +142,28 @@ export function Ledger({
     from,
     to,
     page: String(page),
-    month,
-    week,
   })}`;
   async function refresh() {
+    const ticket = generation.current;
     const r = await fetch(endpoint, { cache: "no-store" });
     if (!r.ok) throw new Error("Unable to refresh history. Please log in again.");
-    setData(await r.json());
+    const result = await r.json();
+    if (ticket === generation.current) setData(result);
+  }
+  function changedSettings(incoming: Record<string, unknown>) {
+    const baseline = record(settingsBaseline.current) ?? {};
+    return Object.fromEntries(
+      Object.entries(incoming).filter(
+        ([key, value]) => JSON.stringify(value) !== JSON.stringify(baseline[key]),
+      ),
+    );
   }
   async function mutate(body: unknown) {
+    generation.current++;
+    mutating.current = true;
     setBusy(true);
     setError("");
     try {
-      const request = record(body),
-        incoming = record(request?.settings);
-      if (request?.action === "settings" && incoming) {
-        const baseline = record(settingsBaseline.current) ?? {};
-        body = {
-          ...request,
-          settings: Object.fromEntries(
-            Object.entries(incoming).filter(
-              ([key, value]) => JSON.stringify(value) !== JSON.stringify(baseline[key]),
-            ),
-          ),
-        };
-      }
       const r = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -185,6 +177,7 @@ export function Ledger({
       setError(e instanceof Error ? e.message : "Unable to save");
       return false;
     } finally {
+      mutating.current = false;
       setBusy(false);
     }
   }
@@ -194,12 +187,14 @@ export function Ledger({
   useEffect(() => {
     const controller = new AbortController();
     const load = async () => {
+      if (mutating.current) return;
+      const ticket = generation.current;
       setLoading(true);
       try {
         const response = await fetch(endpoint, { cache: "no-store", signal: controller.signal });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error ?? "Unable to load history");
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && ticket === generation.current) {
           setData(result);
           setError("");
         }
@@ -300,31 +295,30 @@ export function Ledger({
         ? simklPoster(w.title.poster)
         : null;
   }
-  function Recap({
-    title,
-    period,
-    previous,
-    next,
-  }: {
-    title: string;
-    period: "month" | "week";
-    previous: () => void;
-    next: () => void;
-  }) {
-    const { recorded: rec, imported: est, count, active, top } = data.recaps[period];
+  function Recap({ entry }: { entry: Extract<Data["timeline"][number], { type: "recap" }> }) {
+    const { recorded: rec, imported: est, count, active, top } = entry.summary;
+    const title =
+      entry.period === "month"
+        ? new Intl.DateTimeFormat("en-US", {
+            timeZone: "UTC",
+            month: "long",
+            year: "numeric",
+          }).format(new Date(`${entry.start}T12:00:00Z`))
+        : `Week · ${entry.start} – ${entry.end}`;
     return (
-      <section className="wl-recap">
+      <section className={`wl-recap wl-recap--${entry.period}`} aria-label={`${title} recap`}>
         <div className="wl-section-heading">
           <h2>{title}</h2>
-          <div className="wl-buttons">
-            <button onClick={previous} aria-label="Previous period">
-              ←
-            </button>
-            <button onClick={next} aria-label="Next period">
-              →
-            </button>
-          </div>
+          <span>
+            {entry.period === "month" ? "Monthly recap" : "Weekly recap"}
+            {entry.start <= today && entry.end >= today ? " · so far" : ""}
+          </span>
         </div>
+        <p className="wl-recap-source">
+          {data.settings.includeImportedStats
+            ? "Includes imported/estimated history"
+            : "Imported/estimated history excluded"}
+        </p>
         <div className="wl-recap-grid">
           <div>
             <span>RECORDED PLAYBACK</span>
@@ -476,6 +470,21 @@ export function Ledger({
             </button>
           </div>
         )}
+        <label className="wl-import-toggle">
+          <input
+            type="checkbox"
+            checked={data.settings.includeImportedStats}
+            disabled={busy}
+            onChange={(event) =>
+              void mutate({
+                action: "settings",
+                settings: { includeImportedStats: event.currentTarget.checked },
+              })
+            }
+          />
+          Include imported/estimated watches in statistics
+          <small>Applies to this user in Watch Ledger and Streamystats.</small>
+        </label>
         <div className="wl-stats">
           <div>
             <span>RECORDED PLAYBACK</span>
@@ -496,8 +505,12 @@ export function Ledger({
           </div>
           <div>
             <span>IMPORTED / MANUAL RUNTIME</span>
-            <strong>{seconds(estimated)}</strong>
-            <small>Separate from recorded playback</small>
+            <strong>{seconds(data.availableImportedSeconds)}</strong>
+            <small>
+              {data.settings.includeImportedStats
+                ? "Included in statistics"
+                : "Manual logs included; imports excluded"}
+            </small>
           </div>
         </div>
         <nav className="wl-nav">
@@ -604,7 +617,9 @@ export function Ledger({
                 })}
               </div>
               <div className="wl-calendar-foot">
-                <span>Click a day to filter history. Approximate dates are excluded.</span>
+                <span>
+                  Click a day to filter history. Imported dates follow the statistics toggle.
+                </span>
                 <button
                   onClick={() => {
                     setFrom("");
@@ -615,118 +630,107 @@ export function Ledger({
                 </button>
               </div>
             </section>
-            {!from && !to && (
-              <>
-                <Recap
-                  title={`Your month, recapped · ${new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "long", year: "numeric" }).format(monthDate)}`}
-                  period="month"
-                  previous={() => setMonthOffset((n) => n - 1)}
-                  next={() => setMonthOffset((n) => n + 1)}
-                />
-                <Recap
-                  title={`Your week, recapped · ${week} – ${weekEnd}`}
-                  period="week"
-                  previous={() => setWeekOffset((n) => n - 1)}
-                  next={() => setWeekOffset((n) => n + 1)}
-                />
-              </>
-            )}
             <section className="wl-timeline" aria-busy={loading}>
               <p role="status">
                 {loading ? "Loading history…" : `${data.pagination.total} matching history entries`}
               </p>
-              {grouped.map(([day, watches]) => (
-                <section key={day} className="wl-day">
-                  <div className="wl-day-heading">
-                    <CalendarDays size={18} />
-                    <h2>{/^\d/.test(day) ? dateLabel(day) : day}</h2>
-                    <span>
-                      {watches.length} watch{watches.length === 1 ? "" : "es"}
-                    </span>
-                  </div>
-                  <div className="wl-watch-grid">
-                    {watches.map((w) => {
-                      const url = poster(w);
-                      return (
-                        <article className="wl-watch" key={w.id}>
-                          {url ? (
-                            <img
-                              src={url}
-                              alt=""
-                              loading="lazy"
-                              referrerPolicy="no-referrer"
-                              onError={(e) => {
-                                const fallback = data.settings.remotePosters
-                                  ? simklPoster(w.title.poster)
-                                  : null;
-                                if (fallback && e.currentTarget.src !== fallback)
-                                  e.currentTarget.src = fallback;
-                                else e.currentTarget.style.display = "none";
-                              }}
-                            />
-                          ) : (
-                            <div className="wl-poster">
-                              {w.title.kind === "movie" ? <Film /> : <Tv />}
-                            </div>
-                          )}
-                          <div className="wl-watch-info">
-                            <div className="wl-watch-title">
-                              <h3>{w.title.name}</h3>
-                              <button
-                                aria-label={`Edit ${w.title.name} watch`}
-                                onClick={() =>
-                                  setEdit(
-                                    data.watches.find((original) => original.id === w.id) ?? w,
-                                  )
-                                }
-                              >
-                                <ChevronDown size={16} />
-                              </button>
-                            </div>
-                            <p>{label(w)}</p>
-                            <div className="wl-badges">
-                              {w.sources.includes("simkl") && <span>Imported · SIMKL</span>}
-                              {w.sources.includes("manual") && <span>Manual log</span>}
-                              {w.rewatch && (
-                                <span className="wl-repeat">
-                                  <Repeat size={11} />{" "}
-                                  {w.completed ? "Rewatch" : "Rewatch in progress"}
-                                </span>
-                              )}
-                              <span>{w.completed ? "Completed" : "In progress"}</span>
-                              {w.accuracy !== "accurate" && <span>Date unknown</span>}
-                              {w.completionBasis === "reported" && <span>Legacy completion</span>}
-                            </div>
-                            <small>
-                              {w.end && w.accuracy === "accurate"
-                                ? formatInTimeZone(w.end, zone, "h:mm a") + " · "
-                                : ""}
-                              {w.measuredSeconds
-                                ? seconds(w.measuredSeconds) + " recorded"
-                                : seconds(w.estimatedSeconds) + " imported/manual runtime"}
-                              {w.sessions.length
-                                ? ` · ${w.sessions.length} session${w.sessions.length === 1 ? "" : "s"}`
-                                : ""}
-                            </small>
-                            {w.coverage !== null && (
-                              <div
-                                className="wl-progress"
-                                aria-label={`${Math.round(w.coverage * 100)}% viewed`}
-                              >
-                                <i
-                                  style={{
-                                    width: `${Math.round(w.coverage * 100)}%`,
-                                  }}
-                                />
+              {data.timeline.map((entry) => {
+                if (entry.type === "recap") return <Recap key={entry.key} entry={entry} />;
+                const { day, watches } = entry;
+                return (
+                  <section key={entry.key} className="wl-day">
+                    <div className="wl-day-heading">
+                      <CalendarDays size={18} />
+                      <h2>{/^\d/.test(day) ? dateLabel(day) : day}</h2>
+                      <span>
+                        {watches.length} watch{watches.length === 1 ? "" : "es"}
+                      </span>
+                    </div>
+                    <div className="wl-watch-grid">
+                      {watches.map((w) => {
+                        const url = poster(w);
+                        return (
+                          <article className="wl-watch" key={w.id}>
+                            {url ? (
+                              <img
+                                src={url}
+                                alt=""
+                                loading="lazy"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  const fallback = data.settings.remotePosters
+                                    ? simklPoster(w.title.poster)
+                                    : null;
+                                  if (fallback && e.currentTarget.src !== fallback)
+                                    e.currentTarget.src = fallback;
+                                  else e.currentTarget.style.display = "none";
+                                }}
+                              />
+                            ) : (
+                              <div className="wl-poster">
+                                {w.title.kind === "movie" ? <Film /> : <Tv />}
                               </div>
                             )}
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+                            <div className="wl-watch-info">
+                              <div className="wl-watch-title">
+                                <h3>{w.title.name}</h3>
+                                <button
+                                  aria-label={`Edit ${w.title.name} watch`}
+                                  onClick={() =>
+                                    setEdit(
+                                      data.watches.find((original) => original.id === w.id) ?? w,
+                                    )
+                                  }
+                                >
+                                  <ChevronDown size={16} />
+                                </button>
+                              </div>
+                              <p>{label(w)}</p>
+                              <div className="wl-badges">
+                                {w.sources.includes("simkl") && <span>Imported · SIMKL</span>}
+                                {w.sources.includes("manual") && <span>Manual log</span>}
+                                {w.rewatch && (
+                                  <span className="wl-repeat">
+                                    <Repeat size={11} />{" "}
+                                    {w.completed ? "Rewatch" : "Rewatch in progress"}
+                                  </span>
+                                )}
+                                <span>{w.completed ? "Completed" : "In progress"}</span>
+                                {w.accuracy === "estimated" && <span>Estimated date</span>}
+                                {!w.end && <span>Date unknown</span>}
+                                {w.completionBasis === "reported" && <span>Legacy completion</span>}
+                              </div>
+                              <small>
+                                {w.end && w.accuracy === "accurate"
+                                  ? formatInTimeZone(w.end, zone, "h:mm a") + " · "
+                                  : ""}
+                                {w.measuredSeconds
+                                  ? seconds(w.measuredSeconds) + " recorded"
+                                  : seconds(w.estimatedSeconds) + " imported/manual runtime"}
+                                {w.sessions.length
+                                  ? ` · ${w.sessions.length} session${w.sessions.length === 1 ? "" : "s"}`
+                                  : ""}
+                              </small>
+                              {w.coverage !== null && (
+                                <div
+                                  className="wl-progress"
+                                  aria-label={`${Math.round(w.coverage * 100)}% viewed`}
+                                >
+                                  <i
+                                    style={{
+                                      width: `${Math.round(w.coverage * 100)}%`,
+                                    }}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  </section>
+                );
+              })}
               {data.pagination.total > data.pagination.pageSize && (
                 <div className="wl-buttons" aria-label="History pages">
                   <button
@@ -1048,7 +1052,7 @@ export function Ledger({
                   if (
                     await mutate({
                       action: "settings",
-                      settings: {
+                      settings: changedSettings({
                         completionThreshold: Number(f.get("threshold")) / 100,
 
                         timezone: String(f.get("timezone")),
@@ -1057,7 +1061,7 @@ export function Ledger({
                           .split(",")
                           .map(normalize)
                           .filter(Boolean),
-                      },
+                      }),
                     })
                   )
                     setSettings(false);

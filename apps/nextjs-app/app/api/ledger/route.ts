@@ -49,6 +49,7 @@ const manualSchema = z
 function invalidateLedger(serverId: number, userId: string) {
   // Wrapped for every year shares this tag, including correction resets.
   revalidateTag(`ledger-${serverId}-${userId}`, { expire: 0 });
+  revalidateTag(`ledger-stats-${serverId}`, { expire: 0 });
 }
 export async function GET(request: NextRequest) {
   const sid = serverSchema.safeParse(request.nextUrl.searchParams.get("serverId"));
@@ -141,6 +142,7 @@ export async function POST(request: NextRequest) {
             completionThreshold: z.number().min(0.5).max(1),
             timezone: z.string().min(1).max(100),
             remotePosters: z.boolean(),
+            includeImportedStats: z.boolean(),
             confirmedPriorTitles: z.array(z.string().max(300)).max(1000),
           })
           .partial()

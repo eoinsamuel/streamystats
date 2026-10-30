@@ -5,13 +5,12 @@ import Link from "next/link";
 import { Poster } from "@/app/(app)/servers/[id]/(auth)/dashboard/Poster";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { Item, ServerPublic } from "@/lib/types";
+import type { DashboardRankingItem } from "@/lib/ledger/ranking-model";
+import { simklPoster } from "@/lib/ledger/engine";
+import type { ServerPublic } from "@/lib/types";
 import { cn, formatDuration } from "@/lib/utils";
 
-export interface ItemWithStats extends Item {
-  totalPlayCount: number;
-  totalPlayDuration: number;
-}
+export type ItemWithStats = DashboardRankingItem;
 
 interface TopItemsListProps {
   items: ItemWithStats[];
@@ -21,13 +20,7 @@ interface TopItemsListProps {
   className?: string;
 }
 
-export function TopItemsList({
-  items,
-  server,
-  title,
-  type,
-  className,
-}: TopItemsListProps) {
+export function TopItemsList({ items, server, title, type, className }: TopItemsListProps) {
   const Icon = type === "movie" ? Film : Tv;
 
   return (
@@ -79,28 +72,47 @@ function ItemsList({
               {index + 1}
             </div>
 
-            <Link
-              href={`/servers/${server.id}/library/${item.id}`}
-              className="block overflow-hidden rounded-md shadow-sm transition-transform group-hover:scale-105"
-            >
-              <Poster
-                item={item}
-                server={server}
-                width={60}
-                height={90}
-                className="h-[90px] w-[60px]"
-                preferredImageType="Primary"
-              />
-            </Link>
+            {"imported" in item ? (
+              <div className="h-[90px] w-[60px] rounded-md overflow-hidden">
+                {simklPoster(item.poster) ? (
+                  <img
+                    src={simklPoster(item.poster) ?? ""}
+                    alt=""
+                    loading="lazy"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="text-xs">{item.sourceLabel}</span>
+                )}
+              </div>
+            ) : (
+              <Link
+                href={`/servers/${server.id}/library/${item.id}`}
+                className="block overflow-hidden rounded-md shadow-sm transition-transform group-hover:scale-105"
+              >
+                <Poster
+                  item={item}
+                  server={server}
+                  width={60}
+                  height={90}
+                  className="h-[90px] w-[60px]"
+                  preferredImageType="Primary"
+                />
+              </Link>
+            )}
           </div>
 
           <div className="flex flex-1 flex-col gap-1.5 min-w-0">
-            <Link
-              href={`/servers/${server.id}/library/${item.id}`}
-              className="truncate font-medium leading-tight group-hover:text-primary transition-colors"
-            >
-              {item.name}
-            </Link>
+            {"imported" in item ? (
+              <span className="font-medium truncate">{item.name}</span>
+            ) : (
+              <Link
+                href={`/servers/${server.id}/library/${item.id}`}
+                className="truncate font-medium leading-tight group-hover:text-primary transition-colors"
+              >
+                {item.name}
+              </Link>
+            )}
 
             {(item.productionYear || item.seriesName) && (
               <div className="text-sm text-muted-foreground truncate">
@@ -108,6 +120,11 @@ function ItemsList({
               </div>
             )}
 
+            {!!item.importedWatchCount && (
+              <span className="text-xs text-muted-foreground">
+                {item.importedWatchCount} logged/imported watches included
+              </span>
+            )}
             <div className="mt-1 flex flex-wrap gap-2">
               <Badge
                 variant="secondary"

@@ -1,42 +1,16 @@
 import "server-only";
 
-import {
-  db,
-  items,
-  libraries,
-  servers,
-  sessions,
-  users,
-} from "@streamystats/database";
+import { db, items, libraries, servers, sessions, users } from "@streamystats/database";
 import type { Item } from "@streamystats/database/schema";
 import { tool } from "ai";
-import {
-  and,
-  asc,
-  desc,
-  eq,
-  ilike,
-  inArray,
-  isNotNull,
-  sql,
-} from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNotNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import { getItemEmbeddingComparison } from "@/lib/db/embedding-comparison";
 import { getHistoryByFilters } from "@/lib/db/history";
-import {
-  findItemsByCharacter,
-  findItemsByPerson,
-} from "@/lib/db/item-people-search";
-import {
-  getSimilarItemsForItem,
-  getSimilarStatistics,
-} from "@/lib/db/similar-statistics";
+import { findItemsByCharacter, findItemsByPerson } from "@/lib/db/item-people-search";
+import { getSimilarItemsForItem, getSimilarStatistics } from "@/lib/db/similar-statistics";
 import { getMostWatchedItems } from "@/lib/db/statistics";
-import {
-  getUserStatsSummaryForServer,
-  getUsers,
-  getUserWatchStats,
-} from "@/lib/db/users";
+import { getUserStatsSummaryForServer, getUsers, getUserWatchStats } from "@/lib/db/users";
 
 type EmbeddingProvider = "openai-compatible" | "ollama" | "gemini";
 
@@ -64,10 +38,7 @@ type FormattableItem = Pick<
   overview?: string | null;
 };
 
-function formatItem(
-  item: FormattableItem,
-  stats?: { playCount?: number; playDuration?: number },
-) {
+function formatItem(item: FormattableItem, stats?: { playCount?: number; playDuration?: number }) {
   const base = {
     id: item.id,
     name: item.name,
@@ -84,9 +55,7 @@ function formatItem(
     return {
       ...base,
       playCount: stats.playCount,
-      watchTime: stats.playDuration
-        ? formatDuration(stats.playDuration)
-        : undefined,
+      watchTime: stats.playDuration ? formatDuration(stats.playDuration) : undefined,
     };
   }
   return base;
@@ -157,9 +126,7 @@ async function embedTextForServer({
 
     if (provider === "gemini") {
       const normalized = normalizeBaseUrl(baseUrl);
-      const geminiModel = model.startsWith("models/")
-        ? model
-        : `models/${model}`;
+      const geminiModel = model.startsWith("models/") ? model : `models/${model}`;
       const res = await fetch(`${normalized}/${geminiModel}:embedContent`, {
         method: "POST",
         headers: {
@@ -170,9 +137,7 @@ async function embedTextForServer({
           model: geminiModel,
           content: { parts: [{ text }] },
           taskType: "SEMANTIC_SIMILARITY",
-          ...(dimensions && dimensions > 0
-            ? { outputDimensionality: dimensions }
-            : {}),
+          ...(dimensions && dimensions > 0 ? { outputDimensionality: dimensions } : {}),
         }),
       });
 
@@ -244,8 +209,7 @@ async function embedTextForServer({
     return {
       ok: false,
       reason: "request_failed",
-      error:
-        error instanceof Error ? error.message : "Embedding request failed",
+      error: error instanceof Error ? error.message : "Embedding request failed",
     };
   }
 }
@@ -265,19 +229,13 @@ function getHolidayHintScore(item: Item): number {
     "snowman",
     "mistletoe",
   ];
-  const keywordHits = keywords.reduce(
-    (sum, k) => sum + (haystack.includes(k) ? 1 : 0),
-    0,
-  );
+  const keywordHits = keywords.reduce((sum, k) => sum + (haystack.includes(k) ? 1 : 0), 0);
 
   const genreHits = Array.isArray(item?.genres)
     ? item.genres.reduce(
         (sum: number, g: string) =>
           sum +
-          (typeof g === "string" &&
-          ["holiday", "christmas"].includes(g.toLowerCase())
-            ? 1
-            : 0),
+          (typeof g === "string" && ["holiday", "christmas"].includes(g.toLowerCase()) ? 1 : 0),
         0,
       )
     : 0;
@@ -286,19 +244,11 @@ function getHolidayHintScore(item: Item): number {
 }
 
 const limitSchema = z.object({
-  limit: z
-    .number()
-    .optional()
-    .default(10)
-    .describe("Number of items to return"),
+  limit: z.number().optional().default(10).describe("Number of items to return"),
 });
 
 const limitTypeSchema = z.object({
-  limit: z
-    .number()
-    .optional()
-    .default(10)
-    .describe("Number of items to return"),
+  limit: z.number().optional().default(10).describe("Number of items to return"),
   type: z
     .enum(["Movie", "Series", "all"])
     .optional()
@@ -306,25 +256,26 @@ const limitTypeSchema = z.object({
     .describe("Filter by item type"),
 });
 
-export function createChatTools(
-  serverId: number,
-  userId: string,
-  isAdmin: boolean = false,
-) {
+export function createChatTools(serverId: number, userId: string, isAdmin: boolean = false) {
   return {
     getUserMostWatchedMovies: tool({
-      description:
-        "Get the user's most watched movies ordered by total watch time",
+      description: "Get the user's most watched movies ordered by total watch time",
       inputSchema: limitSchema,
       execute: async ({ limit }: z.infer<typeof limitSchema>) => {
         const result = await getMostWatchedItems({ serverId, userId });
         const movies = result.Movie.slice(0, limit);
         return {
           movies: movies.map((m) =>
-            formatItem(m, {
-              playCount: m.totalPlayCount,
-              playDuration: m.totalPlayDuration,
-            }),
+            "imported" in m
+              ? {
+                  name: m.name,
+                  type: m.type,
+                  year: m.productionYear,
+                  imported: true,
+                  playCount: m.totalPlayCount,
+                  watchTime: formatDuration(m.totalPlayDuration),
+                }
+              : formatItem(m, { playCount: m.totalPlayCount, playDuration: m.totalPlayDuration }),
           ),
           message:
             movies.length > 0
@@ -335,18 +286,23 @@ export function createChatTools(
     }),
 
     getUserMostWatchedSeries: tool({
-      description:
-        "Get the user's most watched TV series ordered by total watch time",
+      description: "Get the user's most watched TV series ordered by total watch time",
       inputSchema: limitSchema,
       execute: async ({ limit }: z.infer<typeof limitSchema>) => {
         const result = await getMostWatchedItems({ serverId, userId });
         const series = result.Series.slice(0, limit);
         return {
           series: series.map((s) =>
-            formatItem(s, {
-              playCount: s.totalPlayCount,
-              playDuration: s.totalPlayDuration,
-            }),
+            "imported" in s
+              ? {
+                  name: s.name,
+                  type: s.type,
+                  year: s.productionYear,
+                  imported: true,
+                  playCount: s.totalPlayCount,
+                  watchTime: formatDuration(s.totalPlayDuration),
+                }
+              : formatItem(s, { playCount: s.totalPlayCount, playDuration: s.totalPlayDuration }),
           ),
           message:
             series.length > 0
@@ -368,9 +324,7 @@ export function createChatTools(
         });
 
         const filtered =
-          type === "all"
-            ? recommendations
-            : recommendations.filter((r) => r.item.type === type);
+          type === "all" ? recommendations : recommendations.filter((r) => r.item.type === type);
 
         const enrichedRecs = filtered.slice(0, limit).map((r) => {
           const recGenres = new Set(r.item.genres || []);
@@ -392,9 +346,7 @@ export function createChatTools(
                 .join('", "')}" and "${baseNames[baseNames.length - 1]}"`;
             }
             if (uniqueSharedGenres.length > 0) {
-              reason += ` (shared: ${uniqueSharedGenres
-                .slice(0, 3)
-                .join(", ")})`;
+              reason += ` (shared: ${uniqueSharedGenres.slice(0, 3).join(", ")})`;
             }
           } else {
             reason = "Popular on this server";
@@ -426,28 +378,15 @@ export function createChatTools(
     getRecentlyAddedItems: tool({
       description: "Get recently added movies and series to the library",
       inputSchema: z.object({
-        limit: z
-          .number()
-          .optional()
-          .default(20)
-          .describe("Number of items to return"),
+        limit: z.number().optional().default(20).describe("Number of items to return"),
         type: z
           .enum(["Movie", "Series", "all"])
           .optional()
           .default("all")
           .describe("Filter by item type"),
       }),
-      execute: async ({
-        limit,
-        type,
-      }: {
-        limit: number;
-        type: "Movie" | "Series" | "all";
-      }) => {
-        const conditions = [
-          eq(items.serverId, serverId),
-          isNotNull(items.dateCreated),
-        ];
+      execute: async ({ limit, type }: { limit: number; type: "Movie" | "Series" | "all" }) => {
+        const conditions = [eq(items.serverId, serverId), isNotNull(items.dateCreated)];
         if (type !== "all") {
           conditions.push(eq(items.type, type));
         } else {
@@ -493,10 +432,7 @@ export function createChatTools(
         type: "Movie" | "Series" | "all";
         limit: number;
       }) => {
-        const conditions = [
-          eq(items.serverId, serverId),
-          ilike(items.name, `%${query}%`),
-        ];
+        const conditions = [eq(items.serverId, serverId), ilike(items.name, `%${query}%`)];
         if (type !== "all") {
           conditions.push(eq(items.type, type));
         } else {
@@ -569,9 +505,7 @@ export function createChatTools(
           personNames,
           message:
             results.length > 0
-              ? `Found ${results.length} items connected to ${personNames.join(
-                  " and ",
-                )}`
+              ? `Found ${results.length} items connected to ${personNames.join(" and ")}`
               : `No items found connected to ${personNames.join(" and ")}`,
         };
       },
@@ -581,9 +515,7 @@ export function createChatTools(
       description:
         "Find the movie or TV series a fictional character appears in. Use this for questions like 'which TV show is Walter White from?', 'what movie has Tony Stark?', or 'where does Eleven appear?'. Returns the matching character roles and the actors who played them.",
       inputSchema: z.object({
-        characterName: z
-          .string()
-          .describe("Name or partial name of the character to search for"),
+        characterName: z.string().describe("Name or partial name of the character to search for"),
         type: z
           .enum(["Movie", "Series", "all"])
           .optional()
@@ -656,12 +588,7 @@ export function createChatTools(
           .default("all")
           .describe("Filter by item type. Defaults to 'all'."),
       }),
-      execute: async ({
-        startDate,
-        endDate,
-        userId: inputUserId,
-        itemType,
-      }) => {
+      execute: async ({ startDate, endDate, userId: inputUserId, itemType }) => {
         const effectiveUserId = isAdmin ? inputUserId : userId;
         const results = await getUserStatsSummaryForServer({
           serverId,
@@ -681,9 +608,7 @@ export function createChatTools(
           })),
           message:
             results.length > 0
-              ? `Found ${results.length} user${
-                  results.length === 1 ? "" : "s"
-                } with watchtime data`
+              ? `Found ${results.length} user${results.length === 1 ? "" : "s"} with watchtime data`
               : "No watchtime data found for the specified criteria",
         };
       },
@@ -708,25 +633,14 @@ export function createChatTools(
           .string()
           .optional()
           .describe("Start date in ISO format (YYYY-MM-DD). Optional."),
-        endDate: z
-          .string()
-          .optional()
-          .describe("End date in ISO format (YYYY-MM-DD). Optional."),
+        endDate: z.string().optional().describe("End date in ISO format (YYYY-MM-DD). Optional."),
         limit: z
           .number()
           .optional()
           .default(50)
-          .describe(
-            "Maximum number of history items to return. Defaults to 50.",
-          ),
+          .describe("Maximum number of history items to return. Defaults to 50."),
       }),
-      execute: async ({
-        userId: inputUserId,
-        itemType,
-        startDate,
-        endDate,
-        limit,
-      }) => {
+      execute: async ({ userId: inputUserId, itemType, startDate, endDate, limit }) => {
         const effectiveUserId = isAdmin ? inputUserId : userId;
         const history = await getHistoryByFilters({
           serverId,
@@ -739,12 +653,9 @@ export function createChatTools(
 
         return {
           history: history.map((item) => {
-            const seriesId =
-              item.item?.seriesId || item.session.seriesId || null;
-            const seriesName =
-              item.item?.seriesName || item.session.seriesName || null;
-            const seasonId =
-              item.item?.seasonId || item.session.seasonId || null;
+            const seriesId = item.item?.seriesId || item.session.seriesId || null;
+            const seriesName = item.item?.seriesName || item.session.seriesName || null;
+            const seasonId = item.item?.seasonId || item.session.seasonId || null;
             const seasonName = item.item?.seasonName || null;
             const episodeNumber = item.item?.indexNumber || null;
             const seasonNumber = item.item?.parentIndexNumber || null;
@@ -755,13 +666,9 @@ export function createChatTools(
               itemType: item.item?.type || "Unknown",
               userName: item.user?.name || item.session.userName || "Unknown",
               userId: item.user?.id || item.session.userId,
-              watchDate: item.session.startTime
-                ? item.session.startTime.toISOString()
-                : null,
+              watchDate: item.session.startTime ? item.session.startTime.toISOString() : null,
               watchDuration: item.session.playDuration || 0,
-              watchDurationFormatted: formatDuration(
-                item.session.playDuration || 0,
-              ),
+              watchDurationFormatted: formatDuration(item.session.playDuration || 0),
               completionPercentage: item.session.percentComplete || 0,
               deviceName: item.session.deviceName,
               clientName: item.session.clientName,
@@ -784,9 +691,7 @@ export function createChatTools(
           }),
           message:
             history.length > 0
-              ? `Found ${history.length} history item${
-                  history.length === 1 ? "" : "s"
-                }`
+              ? `Found ${history.length} history item${history.length === 1 ? "" : "s"}`
               : "No history found for the specified criteria",
         };
       },
@@ -800,14 +705,10 @@ export function createChatTools(
         const allUsers = await getUsers({ serverId });
         const visibleUsers = isAdmin
           ? allUsers.filter((u) => !u.isHidden && !u.isDisabled)
-          : allUsers.filter(
-              (u) => u.id === userId && !u.isHidden && !u.isDisabled,
-            );
+          : allUsers.filter((u) => u.id === userId && !u.isHidden && !u.isDisabled);
         return {
           users: visibleUsers.map((u) => ({ id: u.id, name: u.name })),
-          message: `Found ${visibleUsers.length} user${
-            visibleUsers.length === 1 ? "" : "s"
-          }`,
+          message: `Found ${visibleUsers.length} user${visibleUsers.length === 1 ? "" : "s"}`,
         };
       },
     }),
@@ -818,27 +719,12 @@ export function createChatTools(
       inputSchema: z.object({
         otherUserName: z
           .string()
-          .describe(
-            "Name of the other user to find shared recommendations with",
-          ),
-        limit: z
-          .number()
-          .optional()
-          .default(10)
-          .describe("Number of recommendations"),
+          .describe("Name of the other user to find shared recommendations with"),
+        limit: z.number().optional().default(10).describe("Number of recommendations"),
       }),
-      execute: async ({
-        otherUserName,
-        limit,
-      }: {
-        otherUserName: string;
-        limit: number;
-      }) => {
+      execute: async ({ otherUserName, limit }: { otherUserName: string; limit: number }) => {
         const otherUser = await db.query.users.findFirst({
-          where: and(
-            eq(users.serverId, serverId),
-            ilike(users.name, `%${otherUserName}%`),
-          ),
+          where: and(eq(users.serverId, serverId), ilike(users.name, `%${otherUserName}%`)),
         });
 
         if (!otherUser) {
@@ -857,9 +743,7 @@ export function createChatTools(
           }),
         ]);
 
-        const currentUserRecIds = new Set(
-          currentUserRecs.map((r) => r.item.id),
-        );
+        const currentUserRecIds = new Set(currentUserRecs.map((r) => r.item.id));
         const sharedRecs = otherUserRecs
           .filter((r) => currentUserRecIds.has(r.item.id))
           .slice(0, limit);
@@ -868,25 +752,16 @@ export function createChatTools(
           const currentUserWatched = await db
             .select({ itemId: sessions.itemId })
             .from(sessions)
-            .where(
-              and(eq(sessions.serverId, serverId), eq(sessions.userId, userId)),
-            )
+            .where(and(eq(sessions.serverId, serverId), eq(sessions.userId, userId)))
             .groupBy(sessions.itemId);
 
           const otherUserWatched = await db
             .select({ itemId: sessions.itemId })
             .from(sessions)
-            .where(
-              and(
-                eq(sessions.serverId, serverId),
-                eq(sessions.userId, otherUser.id),
-              ),
-            )
+            .where(and(eq(sessions.serverId, serverId), eq(sessions.userId, otherUser.id)))
             .groupBy(sessions.itemId);
 
-          const currentWatchedIds = new Set(
-            currentUserWatched.map((w) => w.itemId),
-          );
+          const currentWatchedIds = new Set(currentUserWatched.map((w) => w.itemId));
           const bothWatched = otherUserWatched
             .filter((w) => w.itemId && currentWatchedIds.has(w.itemId))
             .map((w) => w.itemId)
@@ -913,10 +788,7 @@ export function createChatTools(
               .map(([genre]) => genre);
 
             if (topGenres.length > 0) {
-              const existingIds = new Set([
-                ...sharedRecs.map((r) => r.item.id),
-                ...bothWatched,
-              ]);
+              const existingIds = new Set([...sharedRecs.map((r) => r.item.id), ...bothWatched]);
 
               const genreRecs = await db
                 .select()
@@ -976,10 +848,7 @@ export function createChatTools(
       description: "Get list of media libraries on the server",
       inputSchema: z.object({}),
       execute: async () => {
-        const libs = await db
-          .select()
-          .from(libraries)
-          .where(eq(libraries.serverId, serverId));
+        const libs = await db.select().from(libraries).where(eq(libraries.serverId, serverId));
 
         return {
           libraries: libs.map((l) => ({
@@ -996,22 +865,10 @@ export function createChatTools(
       description:
         "Get items similar to a specific movie or series. Returns a 'sourceItem' showing what the search was based on, and similar items with a 'reason' field explaining the connection. Use when user asks 'what should I watch after X' or 'find movies like X'. Always mention the sourceItem when presenting results.",
       inputSchema: z.object({
-        itemName: z
-          .string()
-          .describe("Name of the movie or series to find similar items for"),
-        limit: z
-          .number()
-          .optional()
-          .default(10)
-          .describe("Number of similar items to return"),
+        itemName: z.string().describe("Name of the movie or series to find similar items for"),
+        limit: z.number().optional().default(10).describe("Number of similar items to return"),
       }),
-      execute: async ({
-        itemName,
-        limit,
-      }: {
-        itemName: string;
-        limit: number;
-      }) => {
+      execute: async ({ itemName, limit }: { itemName: string; limit: number }) => {
         const foundItems = await db
           .select()
           .from(items)
@@ -1033,11 +890,7 @@ export function createChatTools(
         }
 
         const sourceItem = foundItems[0];
-        const similarItems = await getSimilarItemsForItem(
-          serverId,
-          sourceItem.id,
-          limit,
-        );
+        const similarItems = await getSimilarItemsForItem(serverId, sourceItem.id, limit);
 
         const enrichedSimilar = similarItems.map((r) => {
           const sourceGenres = new Set(sourceItem.genres || []);
@@ -1051,9 +904,7 @@ export function createChatTools(
             }`;
           }
           if (sourceItem.productionYear && r.item.productionYear) {
-            const yearDiff = Math.abs(
-              sourceItem.productionYear - r.item.productionYear,
-            );
+            const yearDiff = Math.abs(sourceItem.productionYear - r.item.productionYear);
             if (yearDiff <= 5) {
               reason += `, from the same era (${r.item.productionYear})`;
             }
@@ -1081,9 +932,7 @@ export function createChatTools(
     getItemsByGenre: tool({
       description: "Get movies or series filtered by genre",
       inputSchema: z.object({
-        genre: z
-          .string()
-          .describe("Genre to filter by (e.g., 'Action', 'Comedy', 'Drama')"),
+        genre: z.string().describe("Genre to filter by (e.g., 'Action', 'Comedy', 'Drama')"),
         type: z.enum(["Movie", "Series", "all"]).optional().default("all"),
         limit: z.number().optional().default(20),
       }),
@@ -1096,10 +945,7 @@ export function createChatTools(
         type: "Movie" | "Series" | "all";
         limit: number;
       }) => {
-        const conditions = [
-          eq(items.serverId, serverId),
-          sql`${genre} = ANY(${items.genres})`,
-        ];
+        const conditions = [eq(items.serverId, serverId), sql`${genre} = ANY(${items.genres})`];
         if (type !== "all") {
           conditions.push(eq(items.type, type));
         } else {
@@ -1131,11 +977,7 @@ export function createChatTools(
       inputSchema: z.object({
         type: z.enum(["Movie", "Series", "all"]).optional().default("all"),
         limit: z.number().optional().default(20),
-        minRating: z
-          .number()
-          .optional()
-          .default(7)
-          .describe("Minimum rating (0-10)"),
+        minRating: z.number().optional().default(7).describe("Minimum rating (0-10)"),
       }),
       execute: async ({
         type,
@@ -1175,9 +1017,7 @@ export function createChatTools(
       description:
         "Semantic search across the user's library using embeddings. Use this for theme-based queries like 'Christmas movie I have', 'cozy winter movie', or 'something like a heist thriller'. Returns items from the library ranked by semantic similarity.",
       inputSchema: z.object({
-        query: z
-          .string()
-          .describe("What the user is looking for (theme/query)"),
+        query: z.string().describe("What the user is looking for (theme/query)"),
         type: z
           .enum(["Movie", "Series", "all"])
           .optional()
@@ -1220,9 +1060,7 @@ export function createChatTools(
             );
           } else {
             conditions.push(
-              sql`(${items.name} ILIKE ${`%${query}%`} OR ${
-                items.overview
-              } ILIKE ${`%${query}%`})`,
+              sql`(${items.name} ILIKE ${`%${query}%`} OR ${items.overview} ILIKE ${`%${query}%`})`,
             );
           }
 
@@ -1248,9 +1086,7 @@ export function createChatTools(
           };
         }
 
-        const { distance, dimensionFilter } = getItemEmbeddingComparison(
-          embed.embedding,
-        );
+        const { distance, dimensionFilter } = getItemEmbeddingComparison(embed.embedding);
         const similarity = sql<number>`1 - (${distance})`;
 
         const conditions = [

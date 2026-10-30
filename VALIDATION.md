@@ -1,17 +1,16 @@
 # Watch Ledger validation
 
-Review follow-up, 2026-10-30, based on fork main `8e9d1ec0d4caf3334de2f83639856294871f4a91`.
+Timeline and shared statistics update, 2026-10-30, based on fork main `1acdccfcc1157751a5c98ed7a62cdadceaaaef8d`.
 
-Passed:
+Passed for this update:
 
-- Both app TypeScript checks.
-- Next.js production compilation, including the ledger page and API.
-- 56 relevant tests: 22 engine/import, 11 API/access/cache, four paginated-view, one PostgreSQL integration, five coverage/final-position, and 13 existing poller/persistence/resolver regressions.
-- The PostgreSQL integration executes the actual ledger migration and persistence code against PGlite. It verifies unrelated concurrent patches survive, older imports retain newer episodes and dates, equivalent manual retries insert once, conflicting key reuse is rejected, user scope is isolated, corrections reset, and old setup-day labels recover their stored source date without rewriting the import.
-- The paginated-view tests verify 205 watches across three pages with no lost entries or partial recap totals, search/date filtering before paging, and the exclusion of completed multi-day watches from In progress.
-- Installer shell syntax and mocked Docker discovery, paths containing spaces, read-only checks, app-only deployment, rollback, and build/backup/launch failure recovery.
-- Native job-server binary compilation.
-- Static rendering of the actual Ledger component: 100 cards, import badges, watch-status filter, pagination, and no setup-day control.
+- Both app TypeScript checks and database package build.
+- Next.js production compilation, including the ledger and dashboard routes.
+- 66 relevant tests across nine suites, including the ledger, coverage, poller, persistence, and item resolver tests.
+- Timeline tests cover estimated dates in normal history, unknown dates at the bottom, shared inclusion rules, recap placement at week/month/year boundaries, and markers not repeating across pages.
+- PostgreSQL/PGlite integration covers the shared settings flag, imported viewing totals in the original statistics query, date filtering, user scope, and an import matching a newly recorded session without double counting.
+- Statistics model tests cover confirmed manual logs with the switch off, exclusions, no invented runtime for inferred history, overlap suppression, and outside-library ranking cards.
+- A browser visual check of a static rendering of the actual Ledger component with synthetic recorded, dated imported, estimated, and undated watches verified the source toggle, inline recaps, and chronological estimated cards. This was not a hydrated interaction or live Jellyfin test.
 - Git whitespace checks.
 
 Reproduce with Bun:
@@ -25,4 +24,4 @@ bun test apps/job-server/src/jobs/watch-coverage.test.ts apps/job-server/src/job
 bun run build:nextjs
 ```
 
-No live Docker, Jellyfin, or end-to-end browser validation was available for this follow-up. The user's existing containers and database were not modified. No new database schema migration is required. Poll-only seek/final-position limitations and supported history limits are documented in WATCH-LEDGER.md; the review findings and resolutions are in REVIEW-FIXES.md.
+No live Docker deployment or Jellyfin connection was available. Existing containers and the user's database were not modified. No new database migration or dependency is required. Supported limits and measurement distinctions are documented in WATCH-LEDGER.md. Previous review resolutions remain documented in REVIEW-FIXES.md.

@@ -1,12 +1,10 @@
+import { ImportedStatsControl } from "@/components/ImportedStatsControl";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { Container } from "@/components/Container";
 import { PageTitle } from "@/components/PageTitle";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  getRecentlyAddedItems,
-  getRecentlyAddedSeriesWithEpisodes,
-} from "@/lib/db/recently-added";
+import { getRecentlyAddedItems, getRecentlyAddedSeriesWithEpisodes } from "@/lib/db/recently-added";
 import { getSeasonalRecommendations } from "@/lib/db/seasonal-recommendations";
 import { getServer } from "@/lib/db/server";
 import { getSimilarSeries } from "@/lib/db/similar-series-statistics";
@@ -23,11 +21,7 @@ import { SimilarSeriesStatistics } from "./SimilarSeriesStatistics";
 import { SimilarMovieStatistics } from "./SimilarStatistics";
 import { UserLeaderboard } from "./UserLeaderboard";
 
-export default async function DashboardPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function DashboardPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
   return (
@@ -56,6 +50,9 @@ async function DashboardContent({ serverId }: { serverId: string }) {
         </div>
       )}
       <PageTitle title="Home" />
+      <Suspense fallback={null}>
+        <ImportedStatsControl serverId={server.id} />
+      </Suspense>
       <GeneralStats server={server} />
     </>
   );
@@ -91,9 +88,7 @@ async function GeneralStats({ server }: { server: ServerPublic }) {
   return (
     <div className="flex flex-col gap-6">
       {/* <ServerSetupMonitor serverId={server.id} serverName={server.name} /> */}
-      {seasonalData && (
-        <SeasonalRecommendations data={seasonalData} server={server} />
-      )}
+      {seasonalData && <SeasonalRecommendations data={seasonalData} server={server} />}
       {recentlyAddedMovies.length > 0 && me && (
         <RecentlyAdded
           items={recentlyAddedMovies}
@@ -103,15 +98,9 @@ async function GeneralStats({ server }: { server: ServerPublic }) {
         />
       )}
       {recentlyAddedSeries.length > 0 && me && (
-        <RecentlyAddedSeries
-          items={recentlyAddedSeries}
-          server={server}
-          userId={me.id}
-        />
+        <RecentlyAddedSeries items={recentlyAddedSeries} server={server} userId={me.id} />
       )}
-      {similarData.length > 0 && (
-        <SimilarMovieStatistics data={similarData} server={server} />
-      )}
+      {similarData.length > 0 && <SimilarMovieStatistics data={similarData} server={server} />}
       {similarSeriesData.length > 0 && (
         <SimilarSeriesStatistics data={similarSeriesData} server={server} />
       )}

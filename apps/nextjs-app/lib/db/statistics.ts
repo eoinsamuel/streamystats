@@ -2,13 +2,7 @@
 
 import "server-only";
 
-import {
-  db,
-  type Item,
-  items,
-  libraries,
-  sessions,
-} from "@streamystats/database";
+import { db, type Item, items, libraries, sessions } from "@streamystats/database";
 import {
   and,
   count,
@@ -22,7 +16,9 @@ import {
   sql,
   sum,
 } from "drizzle-orm";
-import { cacheLife } from "next/cache";
+import { mergeImportedRankings, type DashboardRankings } from "@/lib/ledger/ranking-model";
+import { getImportedStatistics } from "@/lib/ledger/imported-statistics";
+import { cacheLife, cacheTag } from "next/cache";
 import { getStatisticsExclusions } from "./exclusions";
 
 interface ItemWithStats extends Item {
@@ -44,9 +40,11 @@ export async function getMostWatchedItems({
   serverId: string | number;
   userId?: string | number;
   viewerUserId?: string;
-}): Promise<MostWatchedItems> {
+}): Promise<DashboardRankings> {
   "use cache";
   cacheLife("hours");
+
+  cacheTag(`ledger-stats-${serverId}`);
 
   // Get exclusion settings
   const { userExclusion, itemLibraryExclusion } = await getStatisticsExclusions(
@@ -149,20 +147,11 @@ export async function getMostWatchedItems({
   }
 
   // Aggregate series statistics from episodes
-  const seriesStatsMap = new Map<
-    string,
-    { totalPlayCount: number; totalPlayDuration: number }
-  >();
+  const seriesStatsMap = new Map<string, { totalPlayCount: number; totalPlayDuration: number }>();
 
   for (const [seriesId, episodes] of episodesBySeriesId) {
-    const totalPlayCount = episodes.reduce(
-      (sum, ep) => sum + ep.totalPlayCount,
-      0,
-    );
-    const totalPlayDuration = episodes.reduce(
-      (sum, ep) => sum + ep.totalPlayDuration,
-      0,
-    );
+    const totalPlayCount = episodes.reduce((sum, ep) => sum + ep.totalPlayCount, 0);
+    const totalPlayDuration = episodes.reduce((sum, ep) => sum + ep.totalPlayDuration, 0);
 
     seriesStatsMap.set(seriesId, { totalPlayCount, totalPlayDuration });
   }
@@ -193,19 +182,10 @@ export async function getMostWatchedItems({
     }
   }
 
-  // Sort each category by total play duration (descending) and limit to top items
-  const limit = 10; // You can adjust this or make it a parameter
-  grouped.Movie = grouped.Movie.sort(
-    (a, b) => b.totalPlayDuration - a.totalPlayDuration,
-  ).slice(0, limit);
-  grouped.Episode = grouped.Episode.sort(
-    (a, b) => b.totalPlayDuration - a.totalPlayDuration,
-  ).slice(0, limit);
-  grouped.Series = grouped.Series.sort(
-    (a, b) => b.totalPlayDuration - a.totalPlayDuration,
-  ).slice(0, limit);
-
-  return grouped;
+  return mergeImportedRankings(
+    grouped,
+    await getImportedStatistics({ serverId, userId, viewerUserId }),
+  );
 }
 
 export interface WatchTimePerType {
@@ -228,6 +208,8 @@ export async function getWatchTimePerType({
   userId?: string | number;
   viewerUserId?: string;
 }): Promise<WatchTimePerType> {
+  cacheTag(`ledger-stats-${serverId}`);
+
   // Get exclusion settings
   const { userExclusion, itemLibraryExclusion } = await getStatisticsExclusions(
     serverId,
@@ -272,9 +254,7 @@ export async function getWatchTimePerType({
 
   // Now get the item types for each unique itemId
   // Also filter out items from excluded libraries
-  const itemIds = [
-    ...new Set(results.map((r) => r.itemId).filter((id) => id)),
-  ] as string[];
+  const itemIds = [...new Set(results.map((r) => r.itemId).filter((id) => id))] as string[];
   const itemTypeConditions: SQL[] = [inArray(items.id, itemIds)];
   if (itemLibraryExclusion) {
     itemTypeConditions.push(itemLibraryExclusion);
@@ -294,10 +274,7 @@ export async function getWatchTimePerType({
   const itemTypeMap = new Map(itemTypes.map((item) => [item.id, item.type]));
 
   // Group results by date and type
-  const groupedResults = new Map<
-    string,
-    { date: string; type: string; totalWatchTime: number }
-  >();
+  const groupedResults = new Map<string, { date: string; type: string; totalWatchTime: number }>();
 
   for (const result of results) {
     if (!result.date || !result.itemId) continue;
@@ -345,6 +322,19 @@ export async function getWatchTimePerType({
     }
   }
 
+  for (const event of await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  })) {
+    if (!event.day) continue;
+    const type = event.watch.title.kind === "movie" ? "movie" : "episode",
+      key = `${event.day}-${type}`;
+    statistics[key] ??= { type, totalWatchTime: 0 };
+    statistics[key].totalWatchTime += event.seconds;
+  }
   return statistics;
 }
 
@@ -369,8 +359,10 @@ export async function getWatchTimeByLibrary({
   viewerUserId?: string;
 }): Promise<LibraryWatchTime> {
   // Get exclusion settings
-  const { userExclusion, librariesTableExclusion } =
-    await getStatisticsExclusions(serverId, viewerUserId);
+  const { userExclusion, librariesTableExclusion } = await getStatisticsExclusions(
+    serverId,
+    viewerUserId,
+  );
 
   const whereConditions: SQL[] = [
     eq(sessions.serverId, Number(serverId)),
@@ -399,12 +391,7 @@ export async function getWatchTimeByLibrary({
     .innerJoin(items, eq(sessions.itemId, items.id))
     .innerJoin(libraries, eq(items.libraryId, libraries.id))
     .where(and(...whereConditions))
-    .groupBy(
-      sql`DATE(${sessions.startTime})`,
-      libraries.id,
-      libraries.name,
-      libraries.type,
-    )
+    .groupBy(sql`DATE(${sessions.startTime})`, libraries.id, libraries.name, libraries.type)
     .orderBy(sql`DATE(${sessions.startTime})`, libraries.name);
 
   const statistics: LibraryWatchTime = {};
@@ -444,6 +431,8 @@ export async function getMostWatchedDay({
   userId?: string | number;
   viewerUserId?: string;
 }): Promise<MostWatchedDay | null> {
+  cacheTag(`ledger-stats-${serverId}`);
+
   // Get exclusion settings
   const { userExclusion, itemLibraryExclusion } = await getStatisticsExclusions(
     serverId,
@@ -479,16 +468,21 @@ export async function getMostWatchedDay({
     .innerJoin(items, eq(sessions.itemId, items.id))
     .where(and(...whereConditions))
     .groupBy(sql`DATE(${sessions.startTime})`)
-    .orderBy(desc(sum(sessions.playDuration)))
-    .limit(1);
+    .orderBy(desc(sum(sessions.playDuration)));
 
-  const row = rows[0];
-  if (!row?.date) return null;
-
-  return {
-    date: row.date,
-    watchTime: Number(row.totalWatchTime || 0),
-  };
+  const days = new Map(
+    rows.flatMap((row) => (row.date ? [[row.date, Number(row.totalWatchTime ?? 0)] as const] : [])),
+  );
+  for (const event of await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  }))
+    if (event.day) days.set(event.day, (days.get(event.day) ?? 0) + event.seconds);
+  const top = [...days].sort(([, a], [, b]) => b - a)[0];
+  return top ? { date: top[0], watchTime: top[1] } : null;
 }
 
 export interface MostActiveUsersDay {
@@ -507,11 +501,9 @@ export async function getMostActiveUsersDay({
   endDate: string;
   viewerUserId?: string;
 }): Promise<MostActiveUsersDay | null> {
+  cacheTag(`ledger-stats-${serverId}`);
   // Get exclusion settings
-  const { userExclusion } = await getStatisticsExclusions(
-    serverId,
-    viewerUserId,
-  );
+  const { userExclusion } = await getStatisticsExclusions(serverId, viewerUserId);
 
   const whereConditions: SQL[] = [
     eq(sessions.serverId, Number(serverId)),
@@ -529,21 +521,22 @@ export async function getMostActiveUsersDay({
   const rows = await db
     .select({
       date: sql<string>`DATE(${sessions.startTime})`.as("date"),
-      activeUsers: sql<number>`COUNT(DISTINCT ${sessions.userId})`.as(
-        "activeUsers",
-      ),
+      userIds: sql<string[]>`ARRAY_AGG(DISTINCT ${sessions.userId})`.as("userIds"),
     })
     .from(sessions)
     .where(and(...whereConditions))
     .groupBy(sql`DATE(${sessions.startTime})`)
-    .orderBy(desc(sql<number>`COUNT(DISTINCT ${sessions.userId})`))
-    .limit(1);
+    .orderBy(sql`DATE(${sessions.startTime})`);
 
-  const row = rows[0];
-  if (!row?.date) return null;
-
-  return {
-    date: row.date,
-    activeUsers: Number(row.activeUsers || 0),
-  };
+  const dates = new Map(
+    rows.flatMap((row) => (row.date ? [[row.date, new Set(row.userIds)] as const] : [])),
+  );
+  for (const event of await getImportedStatistics({ serverId, viewerUserId, startDate, endDate })) {
+    if (!event.day) continue;
+    const users = dates.get(event.day) ?? new Set<string>();
+    users.add(event.userId);
+    dates.set(event.day, users);
+  }
+  const top = [...dates].sort(([, a], [, b]) => b.size - a.size)[0];
+  return top ? { date: top[0], activeUsers: top[1].size } : null;
 }
