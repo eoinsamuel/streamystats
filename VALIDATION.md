@@ -1,38 +1,28 @@
 # Watch Ledger validation
 
-The package was prepared from Streamystats upstream commit `1a154af6e59b5f6a5407f1e18704cc6bd5ac15bf`.
+Review follow-up, 2026-10-30, based on fork main `8e9d1ec0d4caf3334de2f83639856294871f4a91`.
 
 Passed:
 
-- Shared database package TypeScript build.
-- Next.js app and job-server TypeScript checks.
-- Next.js production compile with both `/servers/[id]/ledger` and `/api/ledger` present in the generated route manifest.
-- Native job-server binary compilation with Bun.
-- 23 engine/import/coverage tests: multi-day resumes, unique watched ranges, seek/rewind/pause rejection, tentative and completed rewatches, near-end resumes, accurate import overlap, undated history, confirmed Smallville baseline, legacy duplicate endpoints, reversible corrections, quoted CSV, bulk setup/invalid dates, intentional manual logs, per-day activity for resumed watches, preservation of metadata during list/rating edits, and safe poster paths.
-- 5 API tests: authentication, server boundary, fixed authenticated-user scope, cross-origin write rejection, validated/scoped manual logs, and required episode identity.
-- 13 existing poller-duration, persistence, and alternate-version item resolver regressions.
-- The additive ledger migration executed on PostgreSQL WASM (PGlite); tests verified source identity upserts, user scoping, transaction rollback, and foreign-key cascades.
-- Import regression using the supplied files: 288 detailed JSON titles and 291 newer CSV titles combine into 291 titles; all 1,634 episode rows are parsed. Approximate and unknown dates are classified separately. The private source files are excluded from this package.
-- Installer shell syntax and simulated Docker tests: Compose discovery including paths with spaces, read-only check, app-only upgrades, rollback, build failure, backup failure and launch-failure recovery.
-- Browser inspection of static server-rendered output from the actual React component: header, counters, filters, calendar, recaps and dated cards. This visual fixture lacks the live Jellyfin item metadata and is not a validated migration result or live app test.
-- Git whitespace/error checks.
+- Both app TypeScript checks.
+- Next.js production compilation, including the ledger page and API.
+- 56 relevant tests: 22 engine/import, 11 API/access/cache, four paginated-view, one PostgreSQL integration, five coverage/final-position, and 13 existing poller/persistence/resolver regressions.
+- The PostgreSQL integration executes the actual ledger migration and persistence code against PGlite. It verifies unrelated concurrent patches survive, older imports retain newer episodes and dates, equivalent manual retries insert once, conflicting key reuse is rejected, user scope is isolated, corrections reset, and old setup-day labels recover their stored source date without rewriting the import.
+- The paginated-view tests verify 205 watches across three pages with no lost entries or partial recap totals, search/date filtering before paging, and the exclusion of completed multi-day watches from In progress.
+- Installer shell syntax and mocked Docker discovery, paths containing spaces, read-only checks, app-only deployment, rollback, and build/backup/launch failure recovery.
+- Native job-server binary compilation.
+- Static rendering of the actual Ledger component: 100 cards, import badges, watch-status filter, pagination, and no setup-day control.
+- Git whitespace checks.
 
-Not run here:
-
-- Docker image builds, container startup, or a real Jellyfin connection. The environment does not provide Docker. Use the included installer check on the Ubuntu server and review container health after installation.
-- Live end-to-end import and editing through the browser. API and database operations were tested separately.
-- Mobile browser interaction.
-
-Reproduce the core checks with Bun installed:
+Reproduce with Bun:
 
 ```bash
 bun install --frozen-lockfile
 bun run build:database
 bun run typecheck
-bun test apps/nextjs-app/lib/ledger/__tests__/engine.test.ts apps/job-server/src/jobs/watch-coverage.test.ts
-(cd apps/nextjs-app && bun test lib/ledger/__tests__/api.test.ts)
-bun test apps/job-server/src/jobs/session-poller.test.ts apps/job-server/src/jobs/session-poller-persistence.test.ts apps/job-server/src/jobs/session-item-resolver.test.ts
+bun test apps/nextjs-app/lib/ledger/__tests__
+bun test apps/job-server/src/jobs/watch-coverage.test.ts apps/job-server/src/jobs/session-poller.test.ts apps/job-server/src/jobs/session-poller-persistence.test.ts apps/job-server/src/jobs/session-item-resolver.test.ts
 bun run build:nextjs
 ```
 
-The upstream migration snapshots have a pre-existing branching collision between 0042 and 0043. Generation of 0045 temporarily set aside the older colliding snapshot, then restored it byte-for-byte. Only the newly generated ledger table statements were retained in the new SQL; existing enabled-folder and performance-index migrations are not repeated. Existing migration files were not changed. This generation issue does not affect applying the already-generated SQL through the existing migration runner.
+No live Docker, Jellyfin, or end-to-end browser validation was available for this follow-up. The user's existing containers and database were not modified. No new database schema migration is required. Poll-only seek/final-position limitations and supported history limits are documented in WATCH-LEDGER.md; the review findings and resolutions are in REVIEW-FIXES.md.
