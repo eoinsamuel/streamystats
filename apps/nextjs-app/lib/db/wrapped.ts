@@ -28,6 +28,8 @@ import {
 } from "drizzle-orm";
 import { cacheLife, cacheTag } from "next/cache";
 import { getStatisticsExclusions } from "./exclusions";
+import { getWatchLedger } from "@/lib/ledger/store";
+import { dayKey } from "@/lib/ledger/engine";
 
 // =============================================================================
 // Types
@@ -992,95 +994,16 @@ export async function getWrappedRewatchStats(
     `wrapped-rewatch-${params.serverId}-${params.userId}-${params.year}`,
   );
 
-  const { serverId, userId, year } = params;
-  const { start, end } = getYearDateRange(year);
-
-  const { userExclusion, itemLibraryExclusion } =
-    await getStatisticsExclusions(serverId);
-
-  const whereConditions: SQL[] = [
-    eq(sessions.serverId, serverId),
-    eq(sessions.userId, userId),
-    gte(sessions.startTime, start),
-    lte(sessions.startTime, end),
-    isNotNull(sessions.itemId),
-  ];
-
-  if (userExclusion) whereConditions.push(userExclusion);
-  if (itemLibraryExclusion) whereConditions.push(itemLibraryExclusion);
-
-  // Get items with multiple plays
-  const itemPlayCounts = await db
-    .select({
-      itemId: sessions.itemId,
-      itemName: items.name,
-      itemType: items.type,
-      primaryImageTag: items.primaryImageTag,
-      seriesName: items.seriesName,
-      productionYear: items.productionYear,
-      playCount: count(sessions.id),
-      totalWatchTimeSeconds: sum(sessions.playDuration),
-    })
-    .from(sessions)
-    .innerJoin(items, eq(sessions.itemId, items.id))
-    .where(and(...whereConditions))
-    .groupBy(
-      sessions.itemId,
-      items.name,
-      items.type,
-      items.primaryImageTag,
-      items.seriesName,
-      items.productionYear,
-    )
-    .having(sql`COUNT(${sessions.id}) > 1`)
-    .orderBy(desc(count(sessions.id)));
-
-  const topRewatchedItems = itemPlayCounts.slice(0, 5).map((item) => ({
-    itemId: item.itemId ?? "",
-    itemName: item.itemName,
-    itemType: item.itemType,
-    playCount: item.playCount,
-    totalWatchTimeSeconds: Number(item.totalWatchTimeSeconds ?? 0),
-    primaryImageTag: item.primaryImageTag,
-    seriesName: item.seriesName,
-    productionYear: item.productionYear,
-  }));
-
-  // Calculate rewatch stats
-  const totalRewatches = itemPlayCounts.reduce(
-    (sum, item) => sum + (item.playCount - 1),
-    0,
-  );
-
-  // Get total plays for percentage
-  const [totalPlaysResult] = await db
-    .select({ total: count(sessions.id) })
-    .from(sessions)
-    .innerJoin(items, eq(sessions.itemId, items.id))
-    .where(and(...whereConditions));
-
-  const totalPlays = totalPlaysResult?.total ?? 0;
-  const rewatchPercentage =
-    totalPlays > 0 ? Math.round((totalRewatches / totalPlays) * 100) : 0;
-
-  const mostRewatched = itemPlayCounts[0];
-
-  return {
-    mostRewatchedItem: mostRewatched
-      ? {
-          itemId: mostRewatched.itemId ?? "",
-          itemName: mostRewatched.itemName,
-          itemType: mostRewatched.itemType,
-          rewatchCount: mostRewatched.playCount - 1,
-          primaryImageTag: mostRewatched.primaryImageTag,
-          seriesName: mostRewatched.seriesName,
-          productionYear: mostRewatched.productionYear,
-        }
-      : null,
-    totalRewatches,
-    rewatchPercentage,
-    topRewatchedItems,
-  };
+  cacheTag(`ledger-${params.serverId}-${params.userId}`);
+  const ledger = await getWatchLedger({serverId:params.serverId,userId:params.userId});
+  const completed = ledger.watches.filter(w=>w.completed && w.accuracy==="accurate" && w.end && Number(dayKey(w.end,ledger.settings.timezone).slice(0,4))===params.year);
+  const repeated = completed.filter(w=>w.rewatch);
+  const counts = new Map<string, {watch: typeof repeated[number]; count:number; seconds:number}>();
+  for(const watch of repeated){const value=counts.get(watch.mediaKey)??{watch,count:0,seconds:0};value.count++;value.seconds+=watch.measuredSeconds+watch.estimatedSeconds;counts.set(watch.mediaKey,value);}
+  const ranked=[...counts.values()].filter(v=>v.watch.itemId).sort((a,b)=>b.count-a.count);
+  const first=ranked[0];
+  const topRewatchedItems=ranked.slice(0,5).map(({watch,count,seconds})=>({itemId:watch.itemId??"",itemName:watch.episodeTitle,itemType:watch.title.kind==="movie"?"Movie":"Episode",playCount:count+1,totalWatchTimeSeconds:seconds,primaryImageTag:null,seriesName:watch.title.kind==="movie"?null:watch.title.name,productionYear:watch.title.year??null}));
+  return {totalRewatches:repeated.length,rewatchPercentage:completed.length?Math.round(repeated.length/completed.length*100):0,topRewatchedItems,mostRewatchedItem:first?{itemId:first.watch.itemId??"",itemName:first.watch.episodeTitle,itemType:first.watch.title.kind==="movie"?"Movie":"Episode",rewatchCount:first.count,primaryImageTag:null,seriesName:first.watch.title.kind==="movie"?null:first.watch.title.name,productionYear:first.watch.title.year??null}:null};
 }
 
 export async function getWrappedGenrePercentiles(

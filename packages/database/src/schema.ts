@@ -1175,3 +1175,16 @@ export type NewPerson = typeof people.$inferInsert;
 
 export type ItemPerson = typeof itemPeople.$inferSelect;
 export type NewItemPerson = typeof itemPeople.$inferInsert;
+
+// Imported history and user corrections are separate from measured playback.
+// Removing a ledger entry must never destroy original Jellyfin session data.
+export const ledgerRecords = pgTable("ledger_records", {
+  id: text("id").primaryKey(),
+  serverId: integer("server_id").notNull().references(() => servers.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  kind: text("kind").notNull(),
+  sourceKey: text("source_key").notNull(),
+  payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [unique("ledger_records_identity").on(t.serverId, t.userId, t.kind, t.sourceKey), index("ledger_records_user_idx").on(t.serverId, t.userId)]);

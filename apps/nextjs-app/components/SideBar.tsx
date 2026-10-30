@@ -99,7 +99,7 @@ const admin_items = [
     icon: ActivitySquare,
   },
   {
-    title: "History",
+    title: "Raw Sessions",
     url: "/history",
     icon: Calendar,
   },
@@ -251,6 +251,7 @@ export const SideBar: React.FC<Props> = ({
     const wrappedYear = currentMonth === 11 ? currentYear : currentYear - 1;
 
     return [
+      { title: "Watch Ledger", url: "/ledger", icon: CalendarDays },
       {
         title: "Library",
         url: "/library",
