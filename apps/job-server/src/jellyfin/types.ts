@@ -56,6 +56,8 @@ export interface JellyfinSession {
 }
 
 export interface TrackedSession {
+  watchedRanges?: [number, number][];
+  startPositionTicks?: number;
   sessionKey: string;
   userJellyfinId: string;
   userName: string;

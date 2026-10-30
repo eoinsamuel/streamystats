@@ -1,0 +1,7 @@
+services:
+  nextjs-app:
+    image: streamystats-watch-ledger-web:0.1.0
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:$${PORT:-3000}/api/health || exit 1"]
+  job-server:
+    image: streamystats-watch-ledger-jobs:0.1.0

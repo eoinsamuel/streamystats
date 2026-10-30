@@ -1,3 +1,5 @@
+> **Custom Watch Ledger build:** Start with [WATCH-LEDGER.md](WATCH-LEDGER.md). Run `bash install-ledger.sh --check` and then `bash install-ledger.sh` to upgrade your existing Streamystats app containers using your original Compose configuration.
+
 # Streamystats
 
 Streamystats is a statistics service for Jellyfin, providing analytics and data visualization. 📈 Built with modern advanced frameworks.

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.itemPeopleRelations = exports.peopleRelations = exports.watchlistItemsRelations = exports.watchlistsRelations = exports.hiddenRecommendationsRelations = exports.anomalyEventsRelations = exports.userFingerprintsRelations = exports.activityLocationsRelations = exports.sessionsRelations = exports.itemsRelations = exports.activitiesRelations = exports.usersRelations = exports.librariesRelations = exports.serverJobConfigurationsRelations = exports.serversRelations = exports.watchlistItems = exports.watchlists = exports.itemPeople = exports.people = exports.anomalyEvents = exports.userFingerprints = exports.activityLocations = exports.hiddenRecommendations = exports.activityLogCursors = exports.activeSessions = exports.sessions = exports.mediaSources = exports.items = exports.serverJobConfigurations = exports.jobResults = exports.activities = exports.users = exports.libraries = exports.servers = void 0;
+exports.ledgerRecords = exports.itemPeopleRelations = exports.peopleRelations = exports.watchlistItemsRelations = exports.watchlistsRelations = exports.hiddenRecommendationsRelations = exports.anomalyEventsRelations = exports.userFingerprintsRelations = exports.activityLocationsRelations = exports.sessionsRelations = exports.itemsRelations = exports.activitiesRelations = exports.usersRelations = exports.librariesRelations = exports.serverJobConfigurationsRelations = exports.serversRelations = exports.watchlistItems = exports.watchlists = exports.itemPeople = exports.people = exports.anomalyEvents = exports.userFingerprints = exports.activityLocations = exports.hiddenRecommendations = exports.activityLogCursors = exports.activeSessions = exports.sessions = exports.mediaSources = exports.items = exports.serverJobConfigurations = exports.jobResults = exports.activities = exports.users = exports.libraries = exports.servers = void 0;
 const pg_core_1 = require("drizzle-orm/pg-core");
 // Custom vector type that supports variable dimensions
 // This allows storing embeddings of any size without hardcoding dimensions
@@ -829,4 +829,16 @@ exports.itemPeopleRelations = (0, drizzle_orm_1.relations)(exports.itemPeople, (
         references: [exports.servers.id],
     }),
 }));
+// Imported history and user corrections are separate from measured playback.
+// Removing a ledger entry must never destroy original Jellyfin session data.
+exports.ledgerRecords = (0, pg_core_1.pgTable)("ledger_records", {
+    id: (0, pg_core_1.text)("id").primaryKey(),
+    serverId: (0, pg_core_1.integer)("server_id").notNull().references(() => exports.servers.id, { onDelete: "cascade" }),
+    userId: (0, pg_core_1.text)("user_id").notNull().references(() => exports.users.id, { onDelete: "cascade" }),
+    kind: (0, pg_core_1.text)("kind").notNull(),
+    sourceKey: (0, pg_core_1.text)("source_key").notNull(),
+    payload: (0, pg_core_1.jsonb)("payload").notNull().$type(),
+    createdAt: (0, pg_core_1.timestamp)("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: (0, pg_core_1.timestamp)("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [(0, pg_core_1.unique)("ledger_records_identity").on(t.serverId, t.userId, t.kind, t.sourceKey), (0, pg_core_1.index)("ledger_records_user_idx").on(t.serverId, t.userId)]);
 //# sourceMappingURL=schema.js.map

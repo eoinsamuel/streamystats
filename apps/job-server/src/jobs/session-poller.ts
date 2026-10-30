@@ -1,3 +1,4 @@
+import { observePlayback } from "./watch-coverage";
 import {
   db,
   activeSessions,
@@ -331,6 +332,8 @@ class SessionPoller {
         seriesName: item.SeriesName,
         seasonId: item.SeasonId,
         positionTicks: playState.PositionTicks || 0,
+        startPositionTicks: playState.PositionTicks || 0,
+        watchedRanges: [],
         runtimeTicks: item.RunTimeTicks || 0,
         playDuration: 0,
         startTime: now,
@@ -450,6 +453,7 @@ class SessionPoller {
 
       const updatedRecord: TrackedSession = {
         ...tracked,
+        watchedRanges: observePlayback({ ranges: tracked.watchedRanges ?? [], previousTicks: tracked.positionTicks, currentTicks: currentPosition, elapsedSeconds: (now.getTime()-tracked.lastUpdateTime.getTime())/1000, wasPaused: tracked.isPaused }),
         positionTicks: currentPosition,
         isPaused: currentPaused,
         lastActivityDate: this.parseDate(session.LastActivityDate),
@@ -555,6 +559,8 @@ class SessionPoller {
       seasonId: item.SeasonId,
       runtimeTicks: item.RunTimeTicks || 0,
       positionTicks: playState.PositionTicks || 0,
+        startPositionTicks: playState.PositionTicks || 0,
+        watchedRanges: [],
       isPaused: playState.IsPaused || false,
       startTime: now,
       lastUpdateTime: now,
@@ -774,6 +780,8 @@ class SessionPoller {
           transcodeReasons: tracked.transcodeReasons,
           rawData: {
             sessionKey: tracked.sessionKey,
+            watchedRanges: tracked.watchedRanges ?? null,
+            startPositionTicks: tracked.startPositionTicks ?? null,
             transcodeReasons: tracked.transcodeReasons,
             nowPlayingItemId: tracked.jellyfinItemId ?? tracked.itemId ?? null,
           },
