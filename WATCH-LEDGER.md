@@ -27,6 +27,8 @@ Completion defaults to 90%, timezone follows the server (UTC fallback), and conf
 
 ## History and statistics
 
+Each dated history heading shows the full daily watch time in hours and minutes, even when its cards span pages. The total follows the imported/estimated statistics switch; hover for the recorded and imported/manual breakdown. Undated history has no daily total. Search and media-type filters affect the totals; the watch-status filter only changes the visible cards.
+
 Monthly and Monday-to-Sunday weekly recaps appear inside history above the entries for their period, including older periods. Recap markers do not repeat when pagination continues within the same period. Current periods are labeled so far.
 
 The per-user **Include imported/estimated watches in statistics** switch defaults off and is shared between Watch Ledger and the Streamystats dashboard. History cards remain visible either way. Confirmed manual logs always count; the switch controls SIMKL imports and estimated manual logs. Enabling it adds completed standalone watches to viewing totals, watch-time charts, title rankings, user summaries, and activity counts. Recorded playback and imported/manual runtime are labeled separately. Imports matched to an existing recorded watch contribute no extra runtime. Unknown dates can contribute to lifetime totals but never to a fabricated calendar date.

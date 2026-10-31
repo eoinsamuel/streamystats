@@ -302,6 +302,7 @@
 }
 .wl-day-heading {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--wl-line);
@@ -316,6 +317,12 @@
 .wl-day-heading > span {
   font-size: 11px;
   color: var(--wl-muted);
+}
+.wl-day-heading .wl-day-hours {
+  font-size: 13px;
+  white-space: nowrap;
+}
+.wl-day-heading .wl-day-count {
   margin-left: auto;
 }
 .wl-watch-grid {

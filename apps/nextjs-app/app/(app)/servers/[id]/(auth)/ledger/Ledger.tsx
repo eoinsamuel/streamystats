@@ -642,7 +642,16 @@ export function Ledger({
                     <div className="wl-day-heading">
                       <CalendarDays size={18} />
                       <h2>{/^\d/.test(day) ? dateLabel(day) : day}</h2>
-                      <span>
+                      {entry.watchTime && (
+                        <span
+                          className="wl-day-hours"
+                          aria-label={`Daily watch time: ${seconds(entry.watchTime.recorded + entry.watchTime.imported)}`}
+                          title={`${seconds(entry.watchTime.recorded)} recorded + ${seconds(entry.watchTime.imported)} imported/manual runtime`}
+                        >
+                          {seconds(entry.watchTime.recorded + entry.watchTime.imported)}
+                        </span>
+                      )}
+                      <span className="wl-day-count">
                         {watches.length} watch{watches.length === 1 ? "" : "es"}
                       </span>
                     </div>

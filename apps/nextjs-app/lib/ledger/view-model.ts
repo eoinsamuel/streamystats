@@ -123,7 +123,13 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
   );
   type Summary = ReturnType<typeof recap>;
   type TimelineEntry =
-    | { type: "day"; key: string; day: string; watches: Watch[] }
+    | {
+        type: "day";
+        key: string;
+        day: string;
+        watches: Watch[];
+        watchTime: { recorded: number; imported: number } | null;
+      }
     | {
         type: "recap";
         key: string;
@@ -164,7 +170,17 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
           summary: recap(start, dayOffset(start, 7)),
         });
     }
-    timeline.push({ type: "day", key: `day:${day}`, day, watches: rows });
+    const totals = days.get(day);
+    timeline.push({
+      type: "day",
+      key: `day:${day}`,
+      day,
+      watches: rows,
+      // Use all matching activity for the date, even when its cards span pages.
+      watchTime: /^\d{4}/.test(day)
+        ? { recorded: totals?.recorded ?? 0, imported: totals?.imported ?? 0 }
+        : null,
+    });
     cursor += rows.length;
   }
   return {
