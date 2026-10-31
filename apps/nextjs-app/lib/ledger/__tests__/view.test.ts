@@ -30,6 +30,15 @@ test("pages are bounded while recap and headline totals use the complete history
     expect(page.totals.completed).toBe(205);
     expect(page.recaps.month.count).toBe(205);
     expect(page.recaps.month.imported).toBe(20500);
+    expect(
+      page.recaps.month.categories.find((category) => category.kind === "movie"),
+    ).toMatchObject({ titles: 205, seconds: 20500 });
+    expect(page.recaps.month.average).toBe(20500);
+    expect(page.recaps.month.peak).toEqual({ day: "2026-10-02", seconds: 20500 });
+    expect(page.timeline.find((entry) => entry.type === "day")?.watchTime).toEqual({
+      recorded: 0,
+      imported: 20500,
+    });
   }
   expect(new Set(pages.flatMap((page) => page.watches.map((watch) => watch.id))).size).toBe(205);
 });
@@ -81,7 +90,14 @@ test("a finished resumed watch is absent from the unfinished filter on every day
     history: [],
     titles: [],
   });
-  expect(buildLedgerView({ ...ledger, watches }, new URLSearchParams()).pagination.total).toBe(2);
+  const all = buildLedgerView({ ...ledger, watches }, new URLSearchParams());
+  expect(all.pagination.total).toBe(2);
+  expect(
+    all.timeline.filter((entry) => entry.type === "day").map((entry) => entry.watchTime),
+  ).toEqual([
+    { recorded: 60, imported: 0 },
+    { recorded: 60, imported: 0 },
+  ]);
   expect(
     buildLedgerView({ ...ledger, watches }, new URLSearchParams({ watchStatus: "in-progress" }))
       .pagination.total,
@@ -107,6 +123,10 @@ test("dated estimates use normal daily cards and only undated entries stay at th
   const view = buildLedgerView({ ...ledger, watches }, new URLSearchParams());
   expect(view.grouped.map(([day]) => day)).toEqual(["2026-09-25", "Watch date unknown"]);
   expect(view.grouped[0][1][0].accuracy).toBe("estimated");
+  expect(
+    view.timeline.find((entry) => entry.type === "day" && entry.day === "Watch date unknown")
+      ?.watchTime,
+  ).toBeNull();
 });
 test("the statistics switch changes totals and recaps without hiding imported history", () => {
   const entries: HistoryEntry[] = [{ ...history[0], source: "simkl", accuracy: "estimated" }];
@@ -126,6 +146,14 @@ test("the statistics switch changes totals and recaps without hiding imported hi
   expect(off.recaps.month.imported).toBe(0);
   expect(on.totals.completed).toBe(1);
   expect(on.recaps.month.imported).toBe(100);
+  expect(off.timeline.find((entry) => entry.type === "day")?.watchTime).toEqual({
+    recorded: 0,
+    imported: 0,
+  });
+  expect(on.timeline.find((entry) => entry.type === "day")?.watchTime).toEqual({
+    recorded: 0,
+    imported: 100,
+  });
 });
 test("recaps appear before their periods and do not repeat on later pages", () => {
   const first = buildLedgerView(ledger, new URLSearchParams());
