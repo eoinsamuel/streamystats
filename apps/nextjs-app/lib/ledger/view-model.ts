@@ -33,11 +33,23 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
     }
     return row;
   };
-  const ranks = new Map<string, Map<string, { title: Title; seconds: number; count: number }>>();
+  type Rank = {
+    title: Title;
+    seconds: number;
+    count: number;
+    image?: { itemId: string; tag: string };
+  };
+  const ranks = new Map<string, Map<string, Rank>>();
+  const watchImages = new Map(
+    statistical.map((watch) => [
+      watch.id,
+      watch.sessions.map((session) => ledger.images[session.id]).find(Boolean),
+    ]),
+  );
   const addRank = (day: string, watch: Watch, seconds: number, count: number) => {
-    const byTitle =
-      ranks.get(day) ?? new Map<string, { title: Title; seconds: number; count: number }>();
-    const row = byTitle.get(watch.title.key) ?? { title: watch.title, seconds: 0, count: 0 };
+    const byTitle = ranks.get(day) ?? new Map<string, Rank>();
+    const row: Rank = byTitle.get(watch.title.key) ?? { title: watch.title, seconds: 0, count: 0 };
+    row.image ??= watchImages.get(watch.id);
     row.seconds += seconds;
     row.count += count;
     byTitle.set(watch.title.key, row);
@@ -60,24 +72,51 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
   const recap = (start: string, end: string) => {
     const matches = (day: string) => day >= start && day < end;
     const rows = [...days.values()].filter((row) => matches(row.day));
-    const top = new Map<string, { title: Title; seconds: number; count: number }>();
+    const top = new Map<string, Rank>();
     for (const [day, byTitle] of ranks)
       if (matches(day))
         for (const [key, contribution] of byTitle) {
-          const row = top.get(key) ?? { title: contribution.title, seconds: 0, count: 0 };
+          const row: Rank = top.get(key) ?? { title: contribution.title, seconds: 0, count: 0 };
+          row.image ??= contribution.image;
           row.seconds += contribution.seconds;
           row.count += contribution.count;
           top.set(key, row);
         }
+    const ranked = [...top.values()]
+      .filter((row) => row.seconds > 0)
+      .sort((a, b) => b.seconds - a.seconds);
+    const categories = (["tv", "movie", "anime"] as const).map((kind) => {
+      const titles = ranked.filter((row) => row.title.kind === kind);
+      return {
+        kind,
+        titles: titles.length,
+        seconds: titles.reduce((sum, row) => sum + row.seconds, 0),
+        top: titles.slice(0, 3),
+      };
+    });
+    const activity = rows.filter((row) => row.recorded + row.imported > 0);
+    const peak = [...activity].sort(
+      (a, b) => b.recorded + b.imported - (a.recorded + a.imported),
+    )[0];
     return {
+      categories,
+      average: activity.length
+        ? activity.reduce((sum, row) => sum + row.recorded + row.imported, 0) / activity.length
+        : 0,
+      peak: peak ? { day: peak.day, seconds: peak.recorded + peak.imported } : null,
+      activity: Array.from(
+        { length: Math.round((Date.parse(end) - Date.parse(start)) / 86400000) },
+        (_, index) => {
+          const day = dayOffset(start, index),
+            row = days.get(day);
+          return { day, seconds: (row?.recorded ?? 0) + (row?.imported ?? 0) };
+        },
+      ),
       recorded: rows.reduce((sum, row) => sum + row.recorded, 0),
       imported: rows.reduce((sum, row) => sum + row.imported, 0),
       count: rows.reduce((sum, row) => sum + row.count, 0),
       active: rows.filter((row) => row.recorded + row.imported > 0).length,
-      top: [...top.values()]
-        .filter((row) => row.seconds > 0)
-        .sort((a, b) => b.seconds - a.seconds)
-        .slice(0, 3),
+      top: ranked.slice(0, 3),
     };
   };
   const monthInput = query.get("month"),

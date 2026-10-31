@@ -5,6 +5,7 @@ import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { formatInTimeZone, fromZonedTime } from "date-fns-tz";
 import {
   CalendarDays,
+  Hourglass,
   ChevronDown,
   Clock,
   Film,
@@ -296,61 +297,173 @@ export function Ledger({
         : null;
   }
   function Recap({ entry }: { entry: Extract<Data["timeline"][number], { type: "recap" }> }) {
-    const { recorded: rec, imported: est, count, active, top } = entry.summary;
+    const {
+      recorded: rec,
+      imported: est,
+      count,
+      active,
+      categories,
+      average,
+      peak,
+      activity,
+    } = entry.summary;
+    const monthLabel = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      month: "long",
+      year: "numeric",
+    }).format(new Date(`${entry.start}T12:00:00Z`));
+    const shortDate = (day: string) =>
+      new Intl.DateTimeFormat("en-US", { timeZone: "UTC", month: "short", day: "numeric" }).format(
+        new Date(`${day}T12:00:00Z`),
+      );
     const title =
       entry.period === "month"
-        ? new Intl.DateTimeFormat("en-US", {
-            timeZone: "UTC",
-            month: "long",
-            year: "numeric",
-          }).format(new Date(`${entry.start}T12:00:00Z`))
-        : `Week · ${entry.start} – ${entry.end}`;
+        ? monthLabel
+        : `${shortDate(entry.start)} – ${shortDate(entry.end)}, ${entry.end.slice(0, 4)}`;
+    const ongoing = entry.start <= today && entry.end >= today;
+    const categoryLabel = { tv: "TV shows", movie: "movies", anime: "anime" };
+    const maxActivity = Math.max(1, ...activity.map((day) => day.seconds));
     return (
       <section className={`wl-recap wl-recap--${entry.period}`} aria-label={`${title} recap`}>
-        <div className="wl-section-heading">
-          <h2>{title}</h2>
-          <span>
-            {entry.period === "month" ? "Monthly recap" : "Weekly recap"}
-            {entry.start <= today && entry.end >= today ? " · so far" : ""}
-          </span>
+        <div className="wl-recap-period">
+          {title}
+          {ongoing ? " · so far" : ""}
         </div>
-        <p className="wl-recap-source">
-          {data.settings.includeImportedStats
-            ? "Includes imported/estimated history"
-            : "Imported/estimated history excluded"}
-        </p>
-        <div className="wl-recap-grid">
-          <div>
-            <span>RECORDED PLAYBACK</span>
-            <strong>{seconds(rec)}</strong>
+        <div className="wl-recap-overview">
+          <div className="wl-recap-intro">
+            <Hourglass size={58} strokeWidth={1.5} aria-hidden="true" />
+            <h2>
+              {entry.period === "month"
+                ? ongoing
+                  ? "This month,"
+                  : "That month,"
+                : ongoing
+                  ? "This week,"
+                  : "That week,"}
+              <br />
+              you watched
+            </h2>
           </div>
-          <div>
-            <span>IMPORTED / MANUAL RUNTIME</span>
-            <strong>{seconds(est)}</strong>
-          </div>
-          <div>
-            <span>COMPLETED WATCHES</span>
-            <strong>{count}</strong>
-          </div>
-          <div>
-            <span>ACTIVE DAYS</span>
-            <strong>{active}</strong>
-          </div>
-        </div>
-        <div className="wl-top">
-          {top.map((t, i) => (
-            <div key={t.title.key}>
-              <b>{i + 1}</b>
-              <div>
-                <strong>{t.title.name}</strong>
-                <small>
-                  {seconds(t.seconds)} · {t.count} completed watches
-                </small>
-              </div>
+          {categories.map((category) => (
+            <div className="wl-recap-category" key={category.kind}>
+              <span>
+                {category.titles}{" "}
+                {category.titles === 1 && category.kind !== "anime"
+                  ? category.kind === "tv"
+                    ? "TV show"
+                    : "movie"
+                  : categoryLabel[category.kind]}
+              </span>
+              <strong>{seconds(category.seconds)}</strong>
             </div>
           ))}
-          {!top.length && <p>No dated viewing in this period.</p>}
         </div>
+        <div className="wl-recap-statbar">
+          <div>
+            <span>Total watched</span>
+            <strong>{seconds(rec + est)}</strong>
+          </div>
+          <div>
+            <span>Days with activity</span>
+            <strong>
+              {active} {active === 1 ? "day" : "days"}
+            </strong>
+            <div className="wl-recap-activity" aria-label={`${active} days with activity`}>
+              {activity.map((day) => (
+                <i
+                  key={day.day}
+                  title={`${shortDate(day.day)}: ${seconds(day.seconds)}`}
+                  style={{
+                    background: day.seconds
+                      ? `rgba(68, 147, 235, ${0.3 + (0.7 * day.seconds) / maxActivity})`
+                      : undefined,
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+          <div>
+            <span>Average per active day</span>
+            <strong>{seconds(average)}</strong>
+          </div>
+          <div>
+            <span>Most active day</span>
+            <strong>{peak ? shortDate(peak.day) : "None"}</strong>
+            {peak && <small>{seconds(peak.seconds)}</small>}
+          </div>
+          <div>
+            <span>Completed watches</span>
+            <strong>{count}</strong>
+          </div>
+        </div>
+        {categories
+          .filter((category) => category.top.length)
+          .map((category) => {
+            const Icon = category.kind === "movie" ? Film : Tv;
+            return (
+              <div
+                className={`wl-recap-ranking wl-recap-ranking--${category.kind}`}
+                key={category.kind}
+              >
+                <div className="wl-recap-ranking-label">
+                  <Icon size={30} strokeWidth={1.5} />
+                  <span>
+                    Most watched
+                    <br />
+                    {categoryLabel[category.kind]}
+                  </span>
+                </div>
+                <div className="wl-recap-posters">
+                  {category.top.map((item, index) => {
+                    const image = item.image
+                      ? getJellyfinImageUrl(serverUrl, item.image.itemId, item.image.tag, {
+                          width: 160,
+                          height: 240,
+                        })
+                      : data.settings.remotePosters
+                        ? simklPoster(item.title.poster)
+                        : null;
+                    return (
+                      <article className="wl-recap-title" key={item.title.key}>
+                        <div className="wl-recap-poster">
+                          {image ? (
+                            <img
+                              src={image}
+                              alt=""
+                              loading="lazy"
+                              referrerPolicy="no-referrer"
+                              onError={(event) => {
+                                event.currentTarget.style.display = "none";
+                              }}
+                            />
+                          ) : (
+                            <Icon size={28} strokeWidth={1.5} />
+                          )}
+                        </div>
+                        <div className="wl-recap-title-info">
+                          <b>{index + 1}</b>
+                          <h3>{item.title.name}</h3>
+                          <p>
+                            {item.count} completed {item.count === 1 ? "watch" : "watches"}
+                          </p>
+                          <small>{seconds(item.seconds)}</small>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        {!categories.some((category) => category.top.length) && (
+          <p className="wl-recap-empty">No dated viewing in this period.</p>
+        )}
+        <p className="wl-recap-source">
+          {seconds(rec)} recorded · {seconds(est)} imported/manual runtime
+          {data.settings.includeImportedStats
+            ? " · Imported/estimated history included"
+            : " · Imported/estimated history excluded"}
+        </p>
       </section>
     );
   }

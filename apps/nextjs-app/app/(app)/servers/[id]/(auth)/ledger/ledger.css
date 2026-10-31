@@ -252,51 +252,6 @@
   padding: 4px 7px;
   font-size: 10px;
 }
-.wl-recap-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 15px;
-  border-bottom: 1px solid var(--wl-line);
-  padding-bottom: 18px;
-}
-.wl-recap-grid strong {
-  display: block;
-  font-size: 26px;
-  font-weight: 600;
-  margin-top: 6px;
-}
-.wl-top {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-top: 18px;
-}
-.wl-top > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  background: #20262e;
-  padding: 12px;
-  border-radius: 4px;
-}
-.wl-top b {
-  font-size: 20px;
-  color: var(--wl-gold);
-  font-weight: 500;
-}
-.wl-top strong {
-  font-size: 12px;
-  display: block;
-}
-.wl-top small {
-  display: block;
-  color: var(--wl-muted);
-  font-size: 10px;
-}
-.wl-top > p {
-  font-size: 12px;
-  color: var(--wl-muted);
-}
 .wl-day {
   margin: 35px 0;
 }
@@ -697,8 +652,298 @@
 }
 .wl-timeline > .wl-recap {
   margin: 26px 0;
-  border-top: 2px solid var(--wl-gold);
+  border-top: 1px solid var(--wl-line);
 }
 .wl-timeline > .wl-recap--week {
   border-top-color: var(--wl-accent);
+}
+
+.wl-timeline > .wl-recap {
+  position: relative;
+  padding: 28px;
+  margin: 38px 0 32px;
+  background: linear-gradient(145deg, #151a1e, #101417);
+  border: 1px solid #30363c;
+  border-radius: 5px;
+  box-shadow: 0 3px 7px #0005;
+}
+.wl-recap-period {
+  position: absolute;
+  right: 18px;
+  top: -16px;
+  padding: 7px 10px;
+  border-radius: 4px;
+  background: #363f46;
+  color: #d6dce1;
+  font-size: 12px;
+  box-shadow: 0 3px 5px #0006;
+}
+.wl-recap-overview {
+  display: grid;
+  grid-template-columns: 1.45fr repeat(3, 1fr);
+  gap: 24px;
+  align-items: center;
+  padding: 4px 0 26px;
+}
+.wl-recap-intro {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+.wl-recap-intro > svg {
+  flex-shrink: 0;
+  color: #66d89e;
+}
+.wl-recap-intro h2 {
+  font-size: 20px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-transform: uppercase;
+  color: #939eae;
+}
+.wl-recap-category > span {
+  display: block;
+  color: #939eae;
+  text-transform: uppercase;
+  font-size: 14px;
+}
+.wl-recap-category > strong {
+  display: block;
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 600;
+  color: #f0f1f3;
+}
+.wl-recap-statbar {
+  display: grid;
+  grid-template-columns: 1.1fr 1fr 1fr 1.25fr 1fr;
+  border: 1px solid #2c3238;
+  border-radius: 5px;
+  box-shadow: 0 3px 5px #0005;
+}
+.wl-recap-statbar > div {
+  padding: 13px 14px;
+  min-width: 0;
+}
+.wl-recap-statbar > div + div {
+  border-left: 1px solid #2c3238;
+}
+.wl-recap-statbar span {
+  display: block;
+  margin-bottom: 7px;
+  color: #929aa4;
+  font-size: 10px;
+  text-transform: uppercase;
+  line-height: 1.5;
+  letter-spacing: 0.5px;
+}
+.wl-recap-statbar strong {
+  color: #d7dbe0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.wl-recap-statbar > div:first-child strong {
+  font-size: 22px;
+}
+.wl-recap-statbar small {
+  display: block;
+  color: #a0a8b3;
+  margin-top: 3px;
+  font-size: 11px;
+}
+.wl-recap-activity {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  max-width: 120px;
+  margin-top: 10px;
+}
+.wl-recap-activity i {
+  height: 6px;
+  border-radius: 1px;
+  background: #22292e;
+}
+.wl-recap-ranking {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  gap: 20px;
+  align-items: center;
+  padding: 22px;
+  margin-top: 20px;
+  border: 1px solid #243b50;
+  border-top: 3px solid #326da3;
+  border-radius: 4px;
+  background: linear-gradient(130deg, #192532, #10171d);
+  box-shadow: 0 3px 6px #0005;
+}
+.wl-recap-ranking--movie {
+  border-color: #453641;
+  border-top-color: #896780;
+  background: linear-gradient(130deg, #28212b, #18151c);
+}
+.wl-recap-ranking--anime {
+  border-top-color: #ac9441;
+}
+.wl-recap-ranking-label {
+  display: flex;
+  gap: 18px;
+  align-items: center;
+  color: #929eaf;
+}
+.wl-recap-ranking-label span {
+  font-size: 17px;
+  font-weight: 400;
+  text-transform: uppercase;
+  line-height: 1.6;
+}
+.wl-recap-posters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 16px;
+}
+.wl-recap-title {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 12px;
+  background: #ffffff03;
+  border: 1px solid #ffffff12;
+  border-radius: 5px;
+}
+.wl-recap-poster {
+  width: 70px;
+  height: 105px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #ffffff06;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #788c9e;
+}
+.wl-recap-poster img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.wl-recap-title-info {
+  min-width: 0;
+}
+.wl-recap-title-info b {
+  display: inline-block;
+  padding: 5px 9px;
+  border: 1px solid #5284b770;
+  border-radius: 3px;
+  color: #6eb3fc;
+  background: #427fc02a;
+  font-size: 12px;
+}
+.wl-recap-title-info h3 {
+  margin: 9px 0 7px;
+  color: #e9edf2;
+  font-size: 13px;
+  font-weight: 550;
+  overflow-wrap: anywhere;
+}
+.wl-recap-title-info p,
+.wl-recap-title-info small {
+  display: block;
+  margin: 0;
+  color: #a8b1bf;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.wl-recap-title-info small {
+  color: #788697;
+}
+.wl-recap-source {
+  margin: 16px 0 0;
+  font-size: 10px;
+  line-height: 1.5;
+  color: #818d9b;
+}
+.wl-recap-empty {
+  color: #929eaf;
+  font-size: 13px;
+}
+@media (max-width: 1100px) {
+  .wl-recap-ranking {
+    grid-template-columns: 1fr;
+  }
+  .wl-recap-ranking-label span br {
+    display: none;
+  }
+  .wl-recap-ranking-label span {
+    font-size: 14px;
+  }
+  .wl-recap-overview {
+    gap: 15px;
+  }
+  .wl-recap-intro {
+    gap: 12px;
+  }
+  .wl-recap-intro h2 {
+    font-size: 16px;
+  }
+}
+@media (max-width: 700px) {
+  .wl-timeline > .wl-recap {
+    padding: 20px 14px 14px;
+  }
+  .wl-recap-period {
+    font-size: 10px;
+    right: 10px;
+  }
+  .wl-recap-overview {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px 10px;
+  }
+  .wl-recap-intro {
+    grid-column: 1 / -1;
+  }
+  .wl-recap-intro > svg {
+    width: 38px;
+    height: 44px;
+  }
+  .wl-recap-intro h2 {
+    font-size: 15px;
+  }
+  .wl-recap-category > span {
+    font-size: 10px;
+  }
+  .wl-recap-category > strong {
+    font-size: 20px;
+  }
+  .wl-recap-statbar {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .wl-recap-statbar > div {
+    padding: 10px;
+  }
+  .wl-recap-statbar > div + div {
+    border-left: 0;
+  }
+  .wl-recap-statbar > div:nth-child(even) {
+    border-left: 1px solid #2c3238;
+  }
+  .wl-recap-statbar > div:nth-child(n + 3) {
+    border-top: 1px solid #2c3238;
+  }
+  .wl-recap-ranking {
+    padding: 14px;
+    gap: 14px;
+  }
+  .wl-recap-posters {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .wl-recap-poster {
+    width: 60px;
+    height: 90px;
+  }
+  .wl-recap-title-info h3 {
+    margin: 5px 0;
+  }
 }
