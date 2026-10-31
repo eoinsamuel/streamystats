@@ -795,7 +795,20 @@ export function Ledger({
                             )}
                             <div className="wl-watch-info">
                               <div className="wl-watch-title">
-                                <h3>{w.title.name}</h3>
+                                <h3>
+                                  {w.itemId ? (
+                                    <Link
+                                      className="wl-watch-link"
+                                      href={`/servers/${serverId}/library/${encodeURIComponent(w.itemId)}`}
+                                      prefetch={false}
+                                      aria-label={`Open ${w.title.name}: ${label(w)} item details`}
+                                    >
+                                      {w.title.name}
+                                    </Link>
+                                  ) : (
+                                    w.title.name
+                                  )}
+                                </h3>
                                 <button
                                   aria-label={`Edit ${w.title.name} watch`}
                                   onClick={() =>
