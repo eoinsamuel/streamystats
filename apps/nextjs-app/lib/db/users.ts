@@ -3,17 +3,12 @@
 import "server-only";
 
 import { db, items, sessions, type User, users } from "@streamystats/database";
+import { and, eq, gte, inArray, isNotNull, lte, type SQL, sql, sum } from "drizzle-orm";
 import {
-  and,
-  eq,
-  gte,
-  inArray,
-  isNotNull,
-  lte,
-  type SQL,
-  sql,
-  sum,
-} from "drizzle-orm";
+  getImportedStatistics,
+  getImportedStatisticsForUsers,
+} from "@/lib/ledger/imported-statistics";
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { jellyfinHeaders } from "@/lib/jellyfin-auth";
 import { getInternalUrl } from "../server-url";
@@ -59,11 +54,7 @@ export const getUserById = async ({
   return user || null;
 };
 
-export const getUsers = async ({
-  serverId,
-}: {
-  serverId: string | number;
-}): Promise<User[]> => {
+export const getUsers = async ({ serverId }: { serverId: string | number }): Promise<User[]> => {
   return await db.query.users.findMany({
     where: eq(users.serverId, Number(serverId)),
   });
@@ -137,9 +128,7 @@ export const getWatchTimePerWeekDay = async ({
   // Use SQL GROUP BY for aggregation instead of fetching all rows
   const result = await db
     .select({
-      weekDay: sql<string>`TRIM(TO_CHAR(${sessions.startTime}, 'Day'))`.as(
-        "weekDay",
-      ),
+      weekDay: sql<string>`TRIM(TO_CHAR(${sessions.startTime}, 'Day'))`.as("weekDay"),
       watchTime: sum(sessions.playDuration).as("watchTime"),
     })
     .from(sessions)
@@ -155,16 +144,21 @@ export const getWatchTimePerWeekDay = async ({
     }
   }
 
+  for (const event of await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  })) {
+    if (!event.watch.end) continue;
+    const day = new Intl.DateTimeFormat("en-US", { timeZone: "UTC", weekday: "long" }).format(
+      new Date(event.watch.end),
+    );
+    resultMap[day] = (resultMap[day] ?? 0) + event.seconds;
+  }
   // Return ordered array (Monday-Sunday)
-  const daysOfWeek = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday",
-  ];
+  const daysOfWeek = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
   return daysOfWeek.map((day) => ({
     day,
@@ -231,10 +225,16 @@ export const getWatchTimePerHour = async ({
     .groupBy(sql`EXTRACT(HOUR FROM ${sessions.startTime})`)
     .orderBy(sql`EXTRACT(HOUR FROM ${sessions.startTime})`);
 
-  return result.map((row) => ({
-    hour: Number(row.hour),
-    watchTime: Number(row.watchTime || 0),
-  }));
+  const hours = new Map(result.map((row) => [Number(row.hour), Number(row.watchTime ?? 0)]));
+  for (const event of await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  }))
+    if (event.hour !== null) hours.set(event.hour, (hours.get(event.hour) ?? 0) + event.seconds);
+  return [...hours].sort(([a], [b]) => a - b).map(([hour, watchTime]) => ({ hour, watchTime }));
 };
 
 export const getTotalWatchTime = async ({
@@ -287,7 +287,16 @@ export const getTotalWatchTime = async ({
     .innerJoin(items, eq(sessions.itemId, items.id))
     .where(and(...whereConditions));
 
-  return Number(result[0]?.playDuration || 0);
+  const imported = await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  });
+  return (
+    Number(result[0]?.playDuration || 0) + imported.reduce((sum, event) => sum + event.seconds, 0)
+  );
 };
 
 interface UserWithWatchTime {
@@ -329,6 +338,8 @@ export const getTotalWatchTimeForUsers = async ({
     }
   }
 
+  for (const event of await getImportedStatisticsForUsers(stringUserIds))
+    watchTimeMap[event.userId] = (watchTimeMap[event.userId] ?? 0) + event.seconds;
   return watchTimeMap;
 };
 
@@ -346,10 +357,7 @@ export const getUserActivityPerDay = async ({
   viewerUserId?: string;
 }): Promise<UserActivityPerDay> => {
   // Get exclusion settings
-  const { userExclusion } = await getStatisticsExclusions(
-    Number(serverId),
-    viewerUserId,
-  );
+  const { userExclusion } = await getStatisticsExclusions(Number(serverId), viewerUserId);
 
   const whereConditions: SQL[] = [
     eq(sessions.serverId, Number(serverId)),
@@ -384,6 +392,10 @@ export const getUserActivityPerDay = async ({
     }
   }
 
+  for (const event of await getImportedStatistics({ serverId, viewerUserId, startDate, endDate })) {
+    if (!event.day) continue;
+    (dateUserSets[event.day] ??= new Set()).add(event.userId);
+  }
   // Convert sets to counts
   for (const [date, userSet] of Object.entries(dateUserSets)) {
     activityMap[date] = userSet.size;
@@ -414,12 +426,9 @@ export const getMe = async (): Promise<User | null> => {
 };
 
 /**
- * Checks if the current user is an admin from the signed session.
- * This is a fast check using the cryptographically signed session cookie.
+ * Verify current privileges before returning server-wide statistics.
  */
-export const isUserAdmin = async (
-  serverId?: number | string,
-): Promise<boolean> => {
+export const isUserAdmin = async (serverId?: number | string): Promise<boolean> => {
   const session = await getSession();
   if (!session?.isAdmin) return false;
   if (
@@ -429,7 +438,7 @@ export const isUserAdmin = async (
   ) {
     return false;
   }
-  return true;
+  return await checkedAdmin();
 };
 
 /**
@@ -439,8 +448,11 @@ export const isUserAdmin = async (
 export const getViewerUserId = async (): Promise<string | undefined> => {
   const session = await getSession();
   if (!session) return undefined;
-  return session.isAdmin ? undefined : session.id;
+  return session.isAdmin && (await checkedAdmin()) ? undefined : session.id;
 };
+
+// React cache is request-local; privilege decisions never survive into another request.
+const checkedAdmin = cache(async () => validateAdminWithJellyfin());
 
 /**
  * Validates admin status against the live Jellyfin server.
@@ -510,8 +522,10 @@ export const getUserStatsSummaryForServer = async ({
   viewerUserId?: string;
 }): Promise<UserStatsSummary[]> => {
   // Get exclusion settings
-  const { userExclusion, itemLibraryExclusion, requiresItemsJoin } =
-    await getStatisticsExclusions(Number(serverId), viewerUserId);
+  const { userExclusion, itemLibraryExclusion, requiresItemsJoin } = await getStatisticsExclusions(
+    Number(serverId),
+    viewerUserId,
+  );
 
   const whereConditions: SQL[] = [
     eq(sessions.serverId, Number(serverId)),
@@ -539,8 +553,7 @@ export const getUserStatsSummaryForServer = async ({
     whereConditions.push(userExclusion);
   }
 
-  const needsItemTypeFilter =
-    itemType && itemType !== "all" && itemType !== undefined;
+  const needsItemTypeFilter = itemType && itemType !== "all" && itemType !== undefined;
 
   // Need to join items if we have library exclusions OR item type filter
   const needsItemJoin = needsItemTypeFilter || requiresItemsJoin;
@@ -579,7 +592,7 @@ export const getUserStatsSummaryForServer = async ({
     .groupBy(sessions.userId, users.name)
     .orderBy(sql`SUM(${sessions.playDuration}) DESC`);
 
-  return results.map(
+  const summary = results.map(
     (result: {
       userId: string | null;
       userName: string | null;
@@ -592,24 +605,41 @@ export const getUserStatsSummaryForServer = async ({
       sessionCount: Number(result.sessionCount || 0),
     }),
   );
+  const byUser = new Map(summary.map((row) => [row.userId, row]));
+  for (const event of await getImportedStatistics({
+    serverId,
+    userId,
+    viewerUserId,
+    startDate,
+    endDate,
+  })) {
+    if (
+      itemType &&
+      itemType !== "all" &&
+      (itemType === "Movie") !== (event.watch.title.kind === "movie")
+    )
+      continue;
+    const row = byUser.get(event.userId) ?? {
+      userId: event.userId,
+      userName: event.userName,
+      totalWatchTime: 0,
+      sessionCount: 0,
+    };
+    row.totalWatchTime += event.seconds;
+    row.sessionCount++;
+    byUser.set(event.userId, row);
+  }
+  return [...byUser.values()].sort((a, b) => b.totalWatchTime - a.totalWatchTime);
 };
 
-export const getServerStatistics = async ({
-  serverId,
-}: {
-  serverId: string | number;
-}) => {
-  const [
-    totalWatchTime,
-    watchTimePerWeekDay,
-    watchTimePerHour,
-    userStatsSummary,
-  ] = await Promise.all([
-    getTotalWatchTime({ serverId }),
-    getWatchTimePerWeekDay({ serverId }),
-    getWatchTimePerHour({ serverId }),
-    getUserStatsSummaryForServer({ serverId }),
-  ]);
+export const getServerStatistics = async ({ serverId }: { serverId: string | number }) => {
+  const [totalWatchTime, watchTimePerWeekDay, watchTimePerHour, userStatsSummary] =
+    await Promise.all([
+      getTotalWatchTime({ serverId }),
+      getWatchTimePerWeekDay({ serverId }),
+      getWatchTimePerHour({ serverId }),
+      getUserStatsSummaryForServer({ serverId }),
+    ]);
 
   return {
     totalWatchTime,
@@ -617,10 +647,7 @@ export const getServerStatistics = async ({
     watchTimePerHour,
     userStatsSummary,
     totalUsers: userStatsSummary.length,
-    totalSessions: userStatsSummary.reduce(
-      (sum, user) => sum + user.sessionCount,
-      0,
-    ),
+    totalSessions: userStatsSummary.reduce((sum, user) => sum + user.sessionCount, 0),
   };
 };
 
@@ -654,53 +681,37 @@ export const getUserWatchStats = async ({
         startTime: sessions.startTime,
       })
       .from(sessions)
-      .where(
-        and(
-          eq(sessions.userId, userId),
-          eq(sessions.serverId, Number(serverId)),
-        ),
-      )
+      .where(and(eq(sessions.userId, userId), eq(sessions.serverId, Number(serverId))))
       .orderBy(sessions.startTime),
   ]);
 
-  // Calculate longest streak (consecutive days with activity)
-  let longestStreak = 0;
-  let currentStreak = 0;
-  let lastDate: string | null = null;
-
-  for (const session of userSessions) {
-    if (session.startTime && session.playDuration && session.playDuration > 0) {
-      const currentDate = session.startTime.toISOString().split("T")[0];
-
-      if (lastDate) {
-        const daysDiff = Math.floor(
-          (new Date(currentDate).getTime() - new Date(lastDate).getTime()) /
-            (1000 * 60 * 60 * 24),
-        );
-
-        if (daysDiff === 1) {
-          currentStreak++;
-        } else if (daysDiff > 1) {
-          longestStreak = Math.max(longestStreak, currentStreak);
-          currentStreak = 1;
-        }
-        // If daysDiff === 0, we're still on the same day, don't change streak
-      } else {
-        currentStreak = 1;
-      }
-
-      lastDate = currentDate;
-    }
+  const imported = await getImportedStatistics({ serverId, userId });
+  const days = [
+    ...new Set([
+      ...userSessions
+        .filter((row) => row.startTime && (row.playDuration ?? 0) > 0)
+        .map((row) => row.startTime?.toISOString().slice(0, 10) ?? ""),
+      ...imported.flatMap((event) => (event.day ? [event.day] : [])),
+    ]),
+  ]
+    .filter(Boolean)
+    .sort();
+  let longestStreak = 0,
+    currentStreak = 0,
+    previous = "";
+  for (const day of days) {
+    const gap = previous ? (Date.parse(day) - Date.parse(previous)) / 86400000 : 0;
+    currentStreak = gap === 1 ? currentStreak + 1 : 1;
+    longestStreak = Math.max(longestStreak, currentStreak);
+    previous = day;
   }
-
-  longestStreak = Math.max(longestStreak, currentStreak);
 
   return {
     total_watch_time: totalWatchTime,
-    total_plays: userSessions.filter(
-      (s: { playDuration: number | null }) =>
-        s.playDuration && s.playDuration > 0,
-    ).length,
+    total_plays:
+      userSessions.filter(
+        (s: { playDuration: number | null }) => s.playDuration && s.playDuration > 0,
+      ).length + imported.length,
     longest_streak: longestStreak, // Return the number of days directly
   };
 };
@@ -753,10 +764,8 @@ export const getUserGenreStats = async ({
       ),
     );
 
-  const genreMap: Record<
-    string,
-    { watchTime: number; playCount: number; displayName: string }
-  > = {};
+  const genreMap: Record<string, { watchTime: number; playCount: number; displayName: string }> =
+    {};
 
   for (const row of sessionItems) {
     if (Array.isArray(row.genres)) {
@@ -765,9 +774,7 @@ export const getUserGenreStats = async ({
         const { key, displayName } = normalizeGenre(genre);
         if (!genreMap[key]) {
           genreMap[key] = { watchTime: 0, playCount: 0, displayName };
-        } else if (
-          isBetterDisplayName(genreMap[key].displayName, displayName)
-        ) {
+        } else if (isBetterDisplayName(genreMap[key].displayName, displayName)) {
           genreMap[key].displayName = displayName;
         }
         genreMap[key].watchTime += row.playDuration || 0;

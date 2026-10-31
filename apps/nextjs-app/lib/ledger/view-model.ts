@@ -1,3 +1,4 @@
+import { watchesForStatistics } from "./statistics-model";
 import type { getWatchLedger } from "./store";
 import { dayKey, groupHistoryDays, type Watch, type Title } from "./engine";
 
@@ -18,7 +19,8 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
       (kind === "all" || w.title.kind === kind) &&
       `${w.title.name} ${w.episodeTitle}`.toLowerCase().includes(search),
   );
-  const completed = watches.filter((w) => w.completed);
+  const statistical = watchesForStatistics(watches, ledger.settings.includeImportedStats);
+  const completed = statistical.filter((w) => w.completed);
   const days = new Map<
     string,
     { day: string; recorded: number; imported: number; count: number }
@@ -31,38 +33,51 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
     }
     return row;
   };
-  for (const watch of watches) {
-    for (const session of watch.sessions)
-      getDay(dayKey(session.start, zone)).recorded += session.seconds;
-    if (watch.accuracy === "accurate" && watch.end) {
-      const day = getDay(dayKey(watch.end, zone));
+  const ranks = new Map<string, Map<string, { title: Title; seconds: number; count: number }>>();
+  const addRank = (day: string, watch: Watch, seconds: number, count: number) => {
+    const byTitle =
+      ranks.get(day) ?? new Map<string, { title: Title; seconds: number; count: number }>();
+    const row = byTitle.get(watch.title.key) ?? { title: watch.title, seconds: 0, count: 0 };
+    row.seconds += seconds;
+    row.count += count;
+    byTitle.set(watch.title.key, row);
+    ranks.set(day, byTitle);
+  };
+  for (const watch of statistical) {
+    for (const session of watch.sessions) {
+      const day = dayKey(session.start, zone);
+      getDay(day).recorded += session.seconds;
+      addRank(day, watch, session.seconds, 0);
+    }
+    if (watch.end) {
+      const key = dayKey(watch.end, zone),
+        day = getDay(key);
       day.imported += watch.estimatedSeconds;
       if (watch.completed) day.count++;
+      addRank(key, watch, watch.estimatedSeconds, watch.completed ? 1 : 0);
     }
   }
   const recap = (start: string, end: string) => {
     const matches = (day: string) => day >= start && day < end;
     const rows = [...days.values()].filter((row) => matches(row.day));
     const top = new Map<string, { title: Title; seconds: number; count: number }>();
-    for (const watch of watches) {
-      let seconds = watch.sessions.reduce(
-        (sum, session) => sum + (matches(dayKey(session.start, zone)) ? session.seconds : 0),
-        0,
-      );
-      if (watch.accuracy === "accurate" && watch.end && matches(dayKey(watch.end, zone)))
-        seconds += watch.estimatedSeconds;
-      if (!seconds) continue;
-      const row = top.get(watch.title.key) ?? { title: watch.title, seconds: 0, count: 0 };
-      row.seconds += seconds;
-      if (watch.completed && watch.end && matches(dayKey(watch.end, zone))) row.count++;
-      top.set(watch.title.key, row);
-    }
+    for (const [day, byTitle] of ranks)
+      if (matches(day))
+        for (const [key, contribution] of byTitle) {
+          const row = top.get(key) ?? { title: contribution.title, seconds: 0, count: 0 };
+          row.seconds += contribution.seconds;
+          row.count += contribution.count;
+          top.set(key, row);
+        }
     return {
       recorded: rows.reduce((sum, row) => sum + row.recorded, 0),
       imported: rows.reduce((sum, row) => sum + row.imported, 0),
       count: rows.reduce((sum, row) => sum + row.count, 0),
       active: rows.filter((row) => row.recorded + row.imported > 0).length,
-      top: [...top.values()].sort((a, b) => b.seconds - a.seconds).slice(0, 3),
+      top: [...top.values()]
+        .filter((row) => row.seconds > 0)
+        .sort((a, b) => b.seconds - a.seconds)
+        .slice(0, 3),
     };
   };
   const monthInput = query.get("month"),
@@ -106,8 +121,56 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
   const sessionIds = new Set(
     originals.flatMap((watch) => watch.sessions.map((session) => session.id)),
   );
+  type Summary = ReturnType<typeof recap>;
+  type TimelineEntry =
+    | { type: "day"; key: string; day: string; watches: Watch[] }
+    | {
+        type: "recap";
+        key: string;
+        period: "month" | "week";
+        start: string;
+        end: string;
+        summary: Summary;
+      };
+  const timeline: TimelineEntry[] = [];
+  const monday = (day: string) =>
+    dayOffset(day, -((new Date(`${day}T12:00:00Z`).getUTCDay() + 6) % 7));
+  let cursor = page * PAGE_SIZE;
+  for (const [day, rows] of grouped) {
+    const previousDay = cards[cursor - 1]?.day;
+    if (/^\d{4}/.test(day)) {
+      if (!previousDay || previousDay.slice(0, 7) !== day.slice(0, 7)) {
+        const start = `${day.slice(0, 7)}-01`,
+          endDate = new Date(`${start}T12:00:00Z`);
+        endDate.setUTCMonth(endDate.getUTCMonth() + 1);
+        const end = endDate.toISOString().slice(0, 10);
+        timeline.push({
+          type: "recap",
+          key: `month:${start}`,
+          period: "month",
+          start,
+          end: dayOffset(end, -1),
+          summary: recap(start, end),
+        });
+      }
+      const start = monday(day);
+      if (!previousDay || !/^\d{4}/.test(previousDay) || monday(previousDay) !== start)
+        timeline.push({
+          type: "recap",
+          key: `week:${start}`,
+          period: "week",
+          start,
+          end: dayOffset(start, 6),
+          summary: recap(start, dayOffset(start, 7)),
+        });
+    }
+    timeline.push({ type: "day", key: `day:${day}`, day, watches: rows });
+    cursor += rows.length;
+  }
   return {
     watches: originals,
+    timeline,
+    availableImportedSeconds: watches.reduce((sum, watch) => sum + watch.estimatedSeconds, 0),
     grouped: [...grouped.entries()],
     titles: ledger.titles,
     settings: ledger.settings,
@@ -116,8 +179,8 @@ export function buildLedgerView(ledger: Ledger, query: URLSearchParams) {
     hiddenCount: ledger.hiddenCount,
     totalWatches: ledger.watches.length,
     totals: {
-      recorded: watches.reduce((sum, watch) => sum + watch.measuredSeconds, 0),
-      imported: watches.reduce((sum, watch) => sum + watch.estimatedSeconds, 0),
+      recorded: statistical.reduce((sum, watch) => sum + watch.measuredSeconds, 0),
+      imported: statistical.reduce((sum, watch) => sum + watch.estimatedSeconds, 0),
       completed: completed.length,
       completedTitles: new Set(completed.map((watch) => watch.title.key)).size,
       rewatches: completed.filter((watch) => watch.rewatch).length,

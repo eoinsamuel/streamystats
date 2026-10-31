@@ -78,12 +78,14 @@ export interface LedgerSettings {
   timezone: string;
   confirmedPriorTitles: string[];
   remotePosters: boolean;
+  includeImportedStats: boolean;
 }
 export const defaults: LedgerSettings = {
   completionThreshold: 0.9,
   timezone: "UTC",
   confirmedPriorTitles: [],
   remotePosters: true,
+  includeImportedStats: false,
 };
 export function record(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -102,13 +104,23 @@ export function validDate(value: unknown): string | null {
   const iso = new Date(time).toISOString();
   return iso.replace(/\.\d{3}Z$/, `.${fraction ? fraction.padEnd(6, "0").slice(0, 6) : "000000"}Z`);
 }
+const dateFormatters = new Map<string, Intl.DateTimeFormat>();
 export function dayKey(value: string, timezone: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date(value));
+  let formatter = dateFormatters.get(timezone);
+  if (!formatter) {
+    if (dateFormatters.size >= 64) {
+      const oldest = dateFormatters.keys().next().value;
+      if (oldest !== undefined) dateFormatters.delete(oldest);
+    }
+    formatter = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    dateFormatters.set(timezone, formatter);
+  }
+  const parts = formatter.formatToParts(new Date(value));
   const get = (key: string) => parts.find((p) => p.type === key)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
@@ -312,14 +324,14 @@ export function buildWatches({
               ),
             )
           : undefined;
-      if (match && imported.sources.includes("simkl") && imported.accuracy === "accurate") {
+      if (match && imported.sources.includes("simkl") && imported.end) {
         match.completed ||= imported.completed;
         match.sources.push(...imported.sources);
         if (match.completionBasis === "incomplete" && match.completed)
           match.completionBasis = "imported";
       } else if (
         imported.sources.includes("simkl") &&
-        imported.accuracy !== "accurate" &&
+        !imported.end &&
         observed.length &&
         !settings.confirmedPriorTitles.includes(normalize(imported.title.name))
       ) {
@@ -399,11 +411,8 @@ export function groupHistoryDays(watches: Watch[], timezone: string): [string, W
     groups.set(day, rows);
   };
   for (const watch of watches) {
-    if (watch.accuracy !== "accurate" || !watch.end) {
-      add(
-        watch.accuracy === "estimated" ? "Estimated earlier history" : "Watch date unknown",
-        watch,
-      );
+    if (!watch.end) {
+      add("Watch date unknown", watch);
       continue;
     }
     if (!watch.sessions.length || watch.dateCorrected) {

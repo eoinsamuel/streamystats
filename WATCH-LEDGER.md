@@ -19,11 +19,19 @@ The installer discovers a single Compose `nextjs-app` container and the `job-ser
 
 Open Watch Ledger and choose a user. Regular accounts can access themselves. Administrators can select another user after their current privileges are verified with Jellyfin. **Imports, manual logs, corrections, ratings, and settings belong to the selected user.** Selecting another user as an administrator lets you edit that user's ledger.
 
-Import SIMKL JSON for episode history and CSV for list metadata. Import dates are retained as supplied. There is no setup-day cutoff and no automatic classification of older dates as estimated. Missing or sentinel dates remain unknown. Existing imports retain their original dates and are normalized on read without rewriting their source records. Old setup-day/estimated labels are no longer used. Imported and manual runtime remain separate from recorded Jellyfin playback; their cards identify their source. An import's runtime is a title-runtime total, not a playback measurement.
+Import SIMKL JSON for episode history and CSV for list metadata. Import dates are retained as supplied. There is no setup-day cutoff and no automatic classification of older dates as estimated. Missing or sentinel dates remain unknown. Existing imports retain their original dates and are normalized on read without rewriting their source records. Legacy estimated labels are preserved when a supplied date exists. Dated estimates use the same daily cards and chronological placement as other watches, with an Estimated date badge. Only genuinely undated watches appear under Watch date unknown. Imported and manual runtime remain separate from recorded Jellyfin playback; their cards identify their source. An import's runtime is a title-runtime total, not a playback measurement.
 
 Imports are additive: an older backup cannot remove episodes found in an earlier upload. Reimporting the same episode retains its later available watch date. CSV supplies list status, ratings, and last-episode summaries; JSON supplies detailed history. Imports do not write to SIMKL or Jellyfin.
 
 Completion defaults to 90%, timezone follows the server (UTC fallback), and confirmed prior titles start empty. These settings can be changed for the selected user. Confirmed prior titles are useful for undated prior viewings. Manual-log retries reuse one request identity; close the form before intentionally logging a different watch.
+
+## History and statistics
+
+Monthly and Monday-to-Sunday weekly recaps appear inside history above the entries for their period, including older periods. Recap markers do not repeat when pagination continues within the same period. Current periods are labeled so far.
+
+The per-user **Include imported/estimated watches in statistics** switch defaults off and is shared between Watch Ledger and the Streamystats dashboard. History cards remain visible either way. Confirmed manual logs always count; the switch controls SIMKL imports and estimated manual logs. Enabling it adds completed standalone watches to viewing totals, watch-time charts, title rankings, user summaries, and activity counts. Recorded playback and imported/manual runtime are labeled separately. Imports matched to an existing recorded watch contribute no extra runtime. Unknown dates can contribute to lifetime totals but never to a fabricated calendar date.
+
+Raw-session, device, transcoding, library, and genre measurements remain based on actual sessions. Other upstream Wrapped panels retain their existing calculations. Titles outside Jellyfin can appear in viewing rankings without a fabricated library link. User exclusions and known library exclusions apply; an external title with no library match has no assigned library.
 
 ## Watches and corrections
 
@@ -31,7 +39,7 @@ Sessions for an unfinished episode are combined across pauses, days, and devices
 
 Earlier days of a multi-day watch show In progress and its final day shows Completed. History's Watch status filter uses the whole watch's current status, so completed watches are excluded from In progress on every day. Search, media type, and date filters apply before pagination. History loads 100 cards per page; headline, activity, and recap totals use all matching supported history, not just that page. Lists show 100 titles per page.
 
-Open a card's arrow menu to mark completion, change rewatch status/date, or hide the watch. Reset corrections to undo. Raw sessions are retained. Wrapped uses completed watches for its rewatch section; other upstream dashboard panels still use original session analytics.
+Open a card's arrow menu to mark completion, change rewatch status/date, or hide the watch. Reset corrections to undo. Raw sessions are retained. Wrapped uses completed watches for its rewatch section.
 
 ## Limits
 
@@ -39,6 +47,7 @@ Open a card's arrow menu to mark completion, change rewatch status/date, or hide
 - A final playback position is included when Jellyfin supplies a matching final observation. A vanished session supplies no final position, so the unobserved tail is not fabricated.
 - Sessions spanning midnight are attributed to their start date.
 - Reads are bounded to 50,000 sessions, 10,000 ledger records/series, and 32 MB of ledger JSON per user. Exceeding a limit shows an explicit error rather than silently truncating history. Imports exceeding the record/JSON limits roll back. Ledger builds use short-lived caching, compact projections, and paginated responses; unlimited-history materialized aggregates are not implemented.
+- Shared imported statistics support up to 100 eligible accounts per server. When library exclusions are active, matching supports up to 50,000 Movie/Series catalog titles. Exceeding either bound returns an explicit error.
 - No live SIMKL/Trakt sync or external catalog search. Enter a title manually or use imported titles.
 - Unknown episode numbering on removed library items is preserved without guessing.
 - Upstream JSON exports do not include ledger additions. Use full PostgreSQL backups.

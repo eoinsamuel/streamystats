@@ -1,13 +1,9 @@
+import { getImportedStatistics } from "@/lib/ledger/imported-statistics";
 import { Clock } from "lucide-react";
 import { redirect } from "next/navigation";
 import type React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  getMe,
-  getTotalWatchTime,
-  getViewerUserId,
-  isUserAdmin,
-} from "@/lib/db/users";
+import { getMe, getTotalWatchTime, getViewerUserId, isUserAdmin } from "@/lib/db/users";
 import type { ServerPublic } from "@/lib/types";
 import { formatDuration } from "@/lib/utils";
 
@@ -17,11 +13,7 @@ interface Props {
   endDate: string;
 }
 
-const TotalWatchTime: React.FC<Props> = async ({
-  server,
-  startDate,
-  endDate,
-}) => {
+const TotalWatchTime: React.FC<Props> = async ({ server, startDate, endDate }) => {
   const [me, isAdmin, viewerUserId] = await Promise.all([
     getMe(),
     isUserAdmin(),
@@ -40,6 +32,16 @@ const TotalWatchTime: React.FC<Props> = async ({
     viewerUserId,
   });
 
+  const imported = (
+    await getImportedStatistics({
+      serverId: server.id,
+      userId: isAdmin ? undefined : me.id,
+      viewerUserId,
+      startDate,
+      endDate,
+    })
+  ).reduce((sum, event) => sum + event.seconds, 0);
+
   return (
     <Card className="flex-1">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-0">
@@ -52,7 +54,9 @@ const TotalWatchTime: React.FC<Props> = async ({
         <div className="text-start">
           <p className="text-3xl font-bold">{formatDuration(d1)}</p>
           <p className="text-sm text-muted-foreground">
-            Total time spent watching in selected period
+            {imported
+              ? `${formatDuration(d1 - imported)} recorded + ${formatDuration(imported)} imported/manual runtime`
+              : "Recorded time in selected period"}
           </p>
         </div>
       </CardContent>

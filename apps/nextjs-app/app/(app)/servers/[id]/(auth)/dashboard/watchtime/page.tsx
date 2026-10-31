@@ -1,3 +1,4 @@
+import { ImportedStatsControl } from "@/components/ImportedStatsControl";
 import { addDays } from "date-fns";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
@@ -58,6 +59,9 @@ export default async function WatchtimePage({
   return (
     <Container className="flex flex-col">
       <PageTitle title="Watchtime Statistics" />
+      <Suspense fallback={null}>
+        <ImportedStatsControl serverId={server.id} />
+      </Suspense>
       <WatchtimeDateRangeFilter className="mb-6" />
       <Suspense fallback={<Skeleton className="h-48 w-full" />}>
         <WatchtimeStats
@@ -91,46 +95,45 @@ async function WatchtimeStats({
 
   const scopedUserId = isAdmin ? undefined : me.id;
 
-  const [d1, d2, mostWatchedDay, mostActiveUsersDay, topUsers] =
-    await Promise.all([
-      getWatchTimePerWeekDay({
-        serverId: server.id,
-        userId: isAdmin ? undefined : me.id,
-        startDate,
-        endDate,
-        viewerUserId,
-      }),
-      getWatchTimePerHour({
-        serverId: server.id,
-        userId: isAdmin ? undefined : me.id,
-        startDate,
-        endDate,
-        viewerUserId,
-      }),
-      getMostWatchedDay({
-        serverId: server.id,
-        userId: scopedUserId,
-        startDate,
-        endDate,
-        viewerUserId,
-      }),
-      isAdmin
-        ? getMostActiveUsersDay({
-            serverId: server.id,
-            startDate,
-            endDate,
-            viewerUserId,
-          })
-        : Promise.resolve(null),
-      isAdmin
-        ? getUserStatsSummaryForServer({
-            serverId: server.id,
-            startDate,
-            endDate,
-            viewerUserId,
-          })
-        : Promise.resolve([]),
-    ]);
+  const [d1, d2, mostWatchedDay, mostActiveUsersDay, topUsers] = await Promise.all([
+    getWatchTimePerWeekDay({
+      serverId: server.id,
+      userId: isAdmin ? undefined : me.id,
+      startDate,
+      endDate,
+      viewerUserId,
+    }),
+    getWatchTimePerHour({
+      serverId: server.id,
+      userId: isAdmin ? undefined : me.id,
+      startDate,
+      endDate,
+      viewerUserId,
+    }),
+    getMostWatchedDay({
+      serverId: server.id,
+      userId: scopedUserId,
+      startDate,
+      endDate,
+      viewerUserId,
+    }),
+    isAdmin
+      ? getMostActiveUsersDay({
+          serverId: server.id,
+          startDate,
+          endDate,
+          viewerUserId,
+        })
+      : Promise.resolve(null),
+    isAdmin
+      ? getUserStatsSummaryForServer({
+          serverId: server.id,
+          startDate,
+          endDate,
+          viewerUserId,
+        })
+      : Promise.resolve([]),
+  ]);
 
   return (
     <div className="flex flex-col gap-6">
@@ -140,11 +143,7 @@ async function WatchtimeStats({
         isAdmin={isAdmin}
       />
       <div className="flex md:flex-row flex-col gap-2">
-        <TotalWatchTime
-          server={server}
-          startDate={startDate}
-          endDate={endDate}
-        />
+        <TotalWatchTime server={server} startDate={startDate} endDate={endDate} />
       </div>
       <Suspense fallback={<Skeleton className="h-48 w-full" />}>
         <Graph server={server} startDate={startDate} endDate={endDate} />
@@ -161,11 +160,7 @@ async function WatchtimeStats({
       />
       {isAdmin ? (
         <>
-          <UserActivityWrapper
-            server={server}
-            startDate={startDate}
-            endDate={endDate}
-          />
+          <UserActivityWrapper server={server} startDate={startDate} endDate={endDate} />
           <WatchtimeTopUsersTable server={server} users={topUsers} />
         </>
       ) : null}

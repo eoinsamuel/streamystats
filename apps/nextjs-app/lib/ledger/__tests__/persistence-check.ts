@@ -3,11 +3,11 @@ import { readFile } from "node:fs/promises";
 import { mock } from "bun:test";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { ledgerRecords, sessions, items, servers } from "@streamystats/database";
+import { ledgerRecords, sessions, items, servers, users } from "@streamystats/database";
 mock.module("server-only", () => ({}));
 const postgres = new PGlite();
 await postgres.exec(
-  "CREATE TABLE servers(id integer PRIMARY KEY, timezone text DEFAULT 'UTC'); CREATE TABLE users(id text PRIMARY KEY); INSERT INTO servers VALUES(1); INSERT INTO users VALUES('viewer'),('other');",
+  "CREATE TABLE servers(id integer PRIMARY KEY, timezone text DEFAULT 'UTC'); CREATE TABLE users(id text PRIMARY KEY, name text DEFAULT 'Viewer', server_id integer DEFAULT 1); INSERT INTO servers VALUES(1); INSERT INTO users(id) VALUES('viewer'),('other');",
 );
 await postgres.exec(
   await readFile(
@@ -25,6 +25,7 @@ mock.module("@streamystats/database", () => ({
   sessions,
   items,
   servers,
+  users,
 }));
 const { saveLedgerRows, resetLedgerCorrections } = await import("../persistence");
 const scope = { serverId: 1, userId: "viewer" };
@@ -83,7 +84,7 @@ mock.module("next/cache", () => ({ cacheLife: () => {}, cacheTag: () => {} }));
 mock.module("@/lib/db/exclusions", () => ({
   getStatisticsExclusions: async () => ({ excludedUserIds: [] }),
 }));
-await postgres.exec(`CREATE TABLE items(id text PRIMARY KEY, server_id integer, series_id text, type text,
+await postgres.exec(`CREATE TABLE items(id text PRIMARY KEY, name text, server_id integer, series_id text, type text,
   production_year integer, provider_ids jsonb, parent_index_number integer, index_number integer, runtime_ticks bigint,
   series_name text, series_primary_image_tag text, primary_image_tag text);
   CREATE TABLE sessions(id text PRIMARY KEY, server_id integer, user_id text, item_id text, item_name text, series_id text, series_name text,
@@ -120,5 +121,73 @@ assert.equal(migrated.watches.find((watch) => watch.title.key === "legacy-title"
 assert.equal(
   migrated.watches.find((watch) => watch.title.key === "legacy-title")?.accuracy,
   "accurate",
+);
+const { getImportedStatisticEvents, getImportedStatistics } = await import(
+  "../imported-statistics"
+);
+const { getTotalWatchTime } = await import("@/lib/db/users");
+assert.equal((await getImportedStatisticEvents(scope)).length, 0);
+assert.equal(await getTotalWatchTime(scope), 0);
+await saveLedgerRows({
+  ...scope,
+  rows: [{ kind: "settings", sourceKey: "key", payload: { includeImportedStats: true } }],
+});
+assert.equal(
+  (await getImportedStatisticEvents(scope)).reduce((sum, event) => sum + event.seconds, 0),
+  100,
+);
+assert.equal(await getTotalWatchTime(scope), 100);
+assert.equal((await getImportedStatistics({ ...scope, startDate: "2026-04-26" })).length, 0);
+assert.equal(
+  (await getImportedStatistics({ ...scope, startDate: "2026-04-25", endDate: "2026-04-25" }))
+    .length,
+  1,
+);
+await postgres.exec(`INSERT INTO items(id, server_id, type, name) VALUES('movie', 1, 'Movie', 'Imported movie');
+INSERT INTO sessions(id, server_id, user_id, item_id, item_name, start_time, end_time, play_duration, runtime_ticks, position_ticks, completed, is_inferred, raw_data)
+VALUES('native',1,'viewer','movie','Imported movie','2026-04-25T12:34:00Z','2026-04-25T12:35:40Z',95,1000000000,950000000,true,false,'{"watchedRanges":[[0,95]],"startPositionTicks":0}');`);
+assert.equal((await getImportedStatisticEvents(scope)).length, 0);
+assert.equal(await getTotalWatchTime(scope), 95);
+await saveLedgerRows({
+  ...scope,
+  rows: [{ kind: "settings", sourceKey: "key", payload: { includeImportedStats: false } }],
+});
+assert.equal(await getTotalWatchTime(scope), 95);
+await saveLedgerRows({
+  serverId: 1,
+  userId: "other",
+  rows: [
+    { kind: "settings", sourceKey: "settings", payload: { includeImportedStats: true } },
+    {
+      kind: "simkl-json",
+      sourceKey: "other-import",
+      payload: {
+        title: { key: "other", name: "Other", kind: "movie" },
+        history: [
+          {
+            key: "other",
+            title: { key: "other", name: "Other", kind: "movie" },
+            watchedAt: sourceDate,
+            accuracy: "estimated",
+            runtime: 200,
+            completed: true,
+            source: "simkl",
+          },
+        ],
+      },
+    },
+  ],
+});
+assert.equal(
+  (await getImportedStatisticEvents({ serverId: 1, userId: "other" })).reduce(
+    (sum, event) => sum + event.seconds,
+    0,
+  ),
+  200,
+);
+assert.equal(
+  (await getImportedStatisticEvents({ serverId: 1, userId: "other", viewerUserId: "viewer" }))
+    .length,
+  0,
 );
 await postgres.close();

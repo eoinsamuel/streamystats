@@ -362,3 +362,25 @@ test("UTC timestamp formatting preserves microseconds and timezone offsets", () 
   expect(validDate("2026-10-30T01:02:03Z")).toBe("2026-10-30T01:02:03.000000Z");
   expect(validDate("2026-10-30T01:02:03.123Z")).toBe("2026-10-30T01:02:03.123000Z");
 });
+
+test("a dated estimate remains a separate historical entry unless it overlaps playback", () => {
+  const historical: HistoryEntry = {
+    key: "earlier",
+    title,
+    season: 1,
+    episode: 1,
+    watchedAt: "2026-02-01T12:00:00Z",
+    accuracy: "estimated",
+    runtime: 2400,
+    completed: true,
+    source: "simkl",
+  };
+  const separated = run([playback()], [historical]);
+  expect(separated).toHaveLength(2);
+  expect(
+    separated.some((watch) => watch.accuracy === "estimated" && watch.end === historical.watchedAt),
+  ).toBe(true);
+  const overlapping = run([playback()], [{ ...historical, watchedAt: "2026-09-01T18:20:00Z" }]);
+  expect(overlapping).toHaveLength(1);
+  expect(overlapping[0].estimatedSeconds).toBe(0);
+});
